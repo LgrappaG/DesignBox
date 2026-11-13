@@ -15,6 +15,7 @@ import {
   UploadCloud,
 } from 'lucide-react';
 import { FaIconBrowser } from '../shared/FaIconBrowser';
+import { StudioColorButton } from '../shared/StudioColorPicker';
 import {
   CustomPropDefinition,
   DesignElement,
@@ -427,15 +428,18 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
           <div className="flex flex-wrap gap-1.5">
             {(el.paletteColors || swatches.slice(0, 5)).map((hex, idx) => (
               <div key={idx} className="flex flex-col items-center gap-0.5">
-                <input
-                  type="color"
+                <StudioColorButton
+                  compact
                   value={hex}
-                  onChange={(e) => {
+                  onChange={(nextColor) => {
                     const copy = [...(el.paletteColors || swatches.slice(0, 5))];
-                    copy[idx] = e.target.value;
+                    copy[idx] = nextColor;
                     updateSelected({ paletteColors: copy });
                   }}
-                  className="w-6 h-6 cursor-pointer border-0 bg-transparent"
+                  fallbackHex="#C86D51"
+                  allowTransparent={false}
+                  swatches={swatches}
+                  title={`Swatch ${idx + 1} (${hex})`}
                 />
                 {(el.paletteColors?.length || 5) > 2 && (
                   <button
@@ -1059,24 +1063,18 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
             )}
           </div>
 
-          <div className="pt-2 border-t border-black/10 space-y-1.5">
+          <div className="pt-2 border-t border-[var(--border-main)] space-y-1.5">
             <span className="font-semibold text-[10px] block">Color Tint / Overlay Layer</span>
             <div className="grid grid-cols-2 gap-2 text-[10px] items-center">
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="color"
-                  value={el.overlayColor || '#C86D51'}
-                  onChange={(e) => updateSelected({ overlayColor: e.target.value })}
-                  className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent"
-                />
-                <input
-                  type="text"
-                  value={el.overlayColor || '#C86D51'}
-                  onChange={(e) => updateSelected({ overlayColor: e.target.value })}
-                  style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                  className="flex-1 border rounded-[5px] px-1.5 py-1 text-[10px] font-mono"
-                />
-              </div>
+              <StudioColorButton
+                value={el.overlayColor || '#C86D51'}
+                onChange={(nextColor) => updateSelected({ overlayColor: nextColor })}
+                fallbackHex="#C86D51"
+                allowTransparent={false}
+                swatches={swatches}
+                fullWidth
+                title="Tint Overlay Color"
+              />
               <label className="block">
                 <span style={{ color: 'var(--text-muted)' }} className="block mb-0.5">
                   Opacity ({el.overlayOpacity ?? 0}%)

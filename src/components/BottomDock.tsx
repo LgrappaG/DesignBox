@@ -83,9 +83,9 @@ export const BottomDock: React.FC<BottomDockProps> = ({
       {/* Bottom Dock Toolbar */}
       <div
         style={{ borderColor: 'var(--border-main)', backgroundColor: 'var(--bg-panel-alt)' }}
-        className="h-8 border-b px-3 flex items-center justify-between gap-2 shrink-0 text-[11px]"
+        className="min-h-8 py-1 border-b px-2.5 flex flex-wrap items-center justify-between gap-1.5 shrink-0 text-[11px]"
       >
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center flex-wrap gap-1.5 min-w-0">
           <button
             type="button"
             onClick={() => onTabChange('code')}
@@ -100,8 +100,8 @@ export const BottomDock: React.FC<BottomDockProps> = ({
             }
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-[5px] border font-semibold transition"
           >
-            <Code2 className="w-3.5 h-3.5" />
-            <span>Live HTML & Validator</span>
+            <Code2 className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">HTML &amp; Validator</span>
             {warnings.length > 0 && (
               <span className="px-1 rounded text-[9px] font-mono bg-amber-500/15 text-amber-500">
                 {warnings.length}
@@ -123,14 +123,14 @@ export const BottomDock: React.FC<BottomDockProps> = ({
             }
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-[5px] border font-semibold transition"
           >
-            <Eye className="w-3.5 h-3.5" />
-            <span>Interactive Live Preview</span>
+            <Eye className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Live Preview</span>
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center flex-wrap gap-1.5 min-w-0">
           {activeTab === 'code' ? (
-            <div className="flex items-center gap-1 text-[10px]">
+            <div className="flex items-center flex-wrap gap-1 text-[10px]">
               <button
                 type="button"
                 onClick={() => onPlatformChange('toyhouse_free')}
@@ -166,10 +166,10 @@ export const BottomDock: React.FC<BottomDockProps> = ({
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 text-[10px]">
+            <div className="flex items-center flex-wrap gap-1.5 text-[10px]">
               <div
                 style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}
-                className="flex items-center border rounded-[5px] p-0.5"
+                className="flex items-center flex-wrap border rounded-[5px] p-0.5"
               >
                 {(
                   [
@@ -197,7 +197,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
               </div>
               <div
                 style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}
-                className="flex items-center border rounded-[5px] p-0.5"
+                className="flex items-center flex-wrap border rounded-[5px] p-0.5"
               >
                 {(
                   [
@@ -238,10 +238,10 @@ export const BottomDock: React.FC<BottomDockProps> = ({
       </div>
 
       {/* Bottom Dock Body */}
-      <div className="flex-1 overflow-hidden flex">
+      <div className="flex-1 overflow-hidden flex min-h-0">
         {activeTab === 'code' ? (
-          <div className="flex-1 grid grid-cols-12 gap-3 p-2.5 overflow-hidden text-xs">
-            <div className="col-span-4 overflow-y-auto pr-1 space-y-1.5">
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-2.5 p-2.5 overflow-hidden text-xs min-h-0">
+            <div className="lg:col-span-4 overflow-y-auto pr-1 space-y-1.5 min-h-0 max-h-36 lg:max-h-none">
               <div className="font-semibold text-[11px] flex items-center justify-between">
                 <span>Platform Sanitizer Check</span>
                 <span style={{ color: 'var(--text-muted)' }} className="font-mono text-[10px]">
@@ -279,7 +279,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
               )}
             </div>
 
-            <div className="col-span-8 flex flex-col overflow-hidden">
+            <div className="lg:col-span-8 flex flex-col overflow-hidden min-h-0">
               <pre
                 style={{
                   backgroundColor: 'var(--bg-input)',

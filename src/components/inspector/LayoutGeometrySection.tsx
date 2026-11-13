@@ -72,7 +72,7 @@ export const LayoutGeometrySection: React.FC<LayoutGeometrySectionProps> = ({
           </label>
         </div>
 
-        <div className="grid grid-cols-7 gap-1 text-[10px] font-mono">
+        <div className="flex flex-wrap gap-1 text-[10px] font-mono">
           {(
             [
               { id: 'left', label: '⇤ L', title: 'Align Left' },
@@ -92,7 +92,7 @@ export const LayoutGeometrySection: React.FC<LayoutGeometrySectionProps> = ({
                 backgroundColor: 'var(--bg-input)',
                 borderColor: 'var(--border-strong)',
               }}
-              className="py-1 rounded-[5px] border hover:opacity-80 text-center"
+              className="flex-1 min-w-[32px] py-1 px-1 rounded-[5px] border hover:opacity-80 text-center whitespace-nowrap"
               title={btn.title}
             >
               {btn.label}
@@ -172,13 +172,13 @@ export const LayoutGeometrySection: React.FC<LayoutGeometrySectionProps> = ({
           </label>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-2">
           <div>
-            <div className="flex items-center justify-between mb-0.5">
-              <span style={{ color: 'var(--text-muted)' }} className="text-[10px]">
+            <div className="flex flex-wrap items-center justify-between gap-1 mb-0.5">
+              <span style={{ color: 'var(--text-muted)' }} className="text-[10px] whitespace-nowrap">
                 Rotation ({el.rotation || 0}°)
               </span>
-              <div className="flex items-center gap-0.5">
+              <div className="flex flex-wrap items-center gap-1">
                 {[0, 90, 180, -90].map((deg) => (
                   <button
                     key={deg}
@@ -186,10 +186,10 @@ export const LayoutGeometrySection: React.FC<LayoutGeometrySectionProps> = ({
                     onClick={() => updateSelected({ rotation: deg })}
                     style={
                       (el.rotation || 0) === deg
-                        ? { backgroundColor: 'var(--accent)', color: '#fff' }
-                        : { backgroundColor: 'var(--bg-input)', color: 'var(--text-muted)' }
+                        ? { backgroundColor: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' }
+                        : { backgroundColor: 'var(--bg-input)', color: 'var(--text-muted)', borderColor: 'var(--border-main)' }
                     }
-                    className="px-1 py-0 rounded text-[8px] font-mono border border-black/10"
+                    className="px-1.5 py-0.5 rounded text-[9px] font-mono border"
                     title={deg === 0 ? 'Reset Rotation' : `Snap to ${deg}° (F2U Safe)`}
                   >
                     {deg}°
@@ -203,7 +203,7 @@ export const LayoutGeometrySection: React.FC<LayoutGeometrySectionProps> = ({
               max={180}
               value={el.rotation || 0}
               onChange={(e) => updateSelected({ rotation: parseInt(e.target.value, 10) || 0 })}
-              className="w-full"
+              className="w-full accent-[var(--accent)]"
             />
             {isToyhouseFree && (el.rotation || 0) !== 0 && (
               <div className="text-[9px] mt-0.5 font-mono">
@@ -219,23 +219,24 @@ export const LayoutGeometrySection: React.FC<LayoutGeometrySectionProps> = ({
               </div>
             )}
           </div>
-          <label>
-            <span style={{ color: 'var(--text-muted)' }} className="block text-[10px] mb-0.5">
-              Opacity ({el.opacity ?? 100}%)
-            </span>
+          <label className="block">
+            <div className="flex items-center justify-between text-[10px] mb-0.5">
+              <span style={{ color: 'var(--text-muted)' }}>Opacity</span>
+              <span className="font-mono text-[10px]">{el.opacity ?? 100}%</span>
+            </div>
             <input
               type="range"
               min={20}
               max={100}
               value={el.opacity ?? 100}
               onChange={(e) => updateSelected({ opacity: parseInt(e.target.value, 10) || 100 })}
-              className="w-full"
+              className="w-full accent-[var(--accent)]"
             />
           </label>
         </div>
 
         {/* Single Border Radius Controller (Linked vs 4-Corner) */}
-        <div className="space-y-1.5 pt-1.5 border-t border-black/10">
+        <div className="space-y-1.5 pt-1.5 border-t border-[var(--border-main)]">
           <div className="flex items-center justify-between">
             <span style={{ color: 'var(--text-muted)' }} className="text-[10px]">
               Corner Border Radius (px)
@@ -358,7 +359,7 @@ export const LayoutGeometrySection: React.FC<LayoutGeometrySectionProps> = ({
           )}
 
           {el.parentId && (
-            <div className="p-2 rounded-[6px] bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 space-y-2 text-[10px]">
+            <div className="p-2 rounded-[6px] bg-black/5 dark:bg-white/5 border border-[var(--border-main)] space-y-2 text-[10px]">
               <div className="flex items-center justify-between">
                 <span className="font-semibold text-accent flex items-center gap-1">
                   <Layers className="w-3 h-3" />
@@ -456,7 +457,7 @@ export const LayoutGeometrySection: React.FC<LayoutGeometrySectionProps> = ({
           }}
           className="p-2.5 rounded-[8px] border space-y-2.5"
         >
-          <div className="flex items-center justify-between border-b border-black/10 pb-1.5">
+          <div className="flex flex-wrap items-center justify-between gap-1 border-b border-[var(--border-main)] pb-1.5">
             <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--accent)' }}>
               <Boxes className="w-3.5 h-3.5" />
               <span>Nested Container Layout</span>
@@ -486,7 +487,7 @@ export const LayoutGeometrySection: React.FC<LayoutGeometrySectionProps> = ({
             <span style={{ color: 'var(--text-muted)' }} className="block text-[10px] font-mono">
               Inner Flow / Structure:
             </span>
-            <div className="grid grid-cols-5 gap-1 text-[10px] font-mono">
+            <div className="flex flex-wrap gap-1 text-[10px] font-mono">
               {(
                 [
                   { id: 'flex_col', label: 'Stack ⬇' },
@@ -508,7 +509,7 @@ export const LayoutGeometrySection: React.FC<LayoutGeometrySectionProps> = ({
                     borderColor: 'var(--border-strong)',
                     color: (el.containerLayout || 'flex_col') === mode.id ? '#fff' : 'inherit',
                   }}
-                  className="py-1 rounded-[5px] border text-center font-medium transition"
+                  className="flex-1 min-w-[66px] py-1 px-1.5 rounded-[5px] border text-center font-medium transition whitespace-nowrap"
                 >
                   {mode.label}
                 </button>

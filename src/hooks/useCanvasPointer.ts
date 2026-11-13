@@ -264,15 +264,20 @@ export function useCanvasPointer({
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
       if (panelResizeDrag) {
+        const vw = typeof window !== 'undefined' ? window.innerWidth : 1380;
+        const vh = typeof window !== 'undefined' ? window.innerHeight : 860;
+        const maxLeft = Math.max(200, Math.min(520, vw - 520));
+        const maxRight = Math.max(240, Math.min(620, vw - 520));
+        const maxBottom = Math.max(140, Math.min(520, vh - 260));
         if (panelResizeDrag.target === 'left') {
           const nextW = Math.round(panelResizeDrag.origValue + (e.clientX - panelResizeDrag.startX));
-          setLeftPanelWidth(Math.max(220, Math.min(520, nextW)));
+          setLeftPanelWidth(Math.max(190, Math.min(maxLeft, nextW)));
         } else if (panelResizeDrag.target === 'right') {
           const nextW = Math.round(panelResizeDrag.origValue + (panelResizeDrag.startX - e.clientX));
-          setRightPanelWidth(Math.max(260, Math.min(620, nextW)));
+          setRightPanelWidth(Math.max(220, Math.min(maxRight, nextW)));
         } else if (panelResizeDrag.target === 'bottom') {
           const nextH = Math.round(panelResizeDrag.origValue + (panelResizeDrag.startY - e.clientY));
-          setBottomDockHeight(Math.max(140, Math.min(520, nextH)));
+          setBottomDockHeight(Math.max(140, Math.min(maxBottom, nextH)));
         } else if (panelResizeDrag.target === 'left_split') {
           const splitRect = leftSplitContainerRef.current?.getBoundingClientRect();
           const totalH = Math.max(240, splitRect?.height || 640);

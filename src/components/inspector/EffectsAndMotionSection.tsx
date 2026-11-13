@@ -9,6 +9,7 @@ interface EffectsAndMotionSectionProps {
   el: DesignElement;
   updateSelected: (patch: Partial<DesignElement>) => void;
   isToyhouseFree: boolean;
+  swatches?: string[];
 }
 
 /** Elevation shadows, glassmorphism, custom shadows, modifier stack, interactivity & motion. */
@@ -16,6 +17,7 @@ export const EffectsAndMotionSection: React.FC<EffectsAndMotionSectionProps> = (
   el,
   updateSelected,
   isToyhouseFree,
+  swatches,
 }) => {
   return (
     <div className="space-y-3">
@@ -121,6 +123,7 @@ export const EffectsAndMotionSection: React.FC<EffectsAndMotionSectionProps> = (
         el={el}
         updateSelected={updateSelected}
         isToyhouseFree={isToyhouseFree}
+        swatches={swatches}
       />
 
       {/* Non-Destructive Blender-Style Modifier Stack */}
@@ -135,6 +138,7 @@ export const EffectsAndMotionSection: React.FC<EffectsAndMotionSectionProps> = (
           el={el}
           updateSelected={updateSelected}
           isToyhouseFree={isToyhouseFree}
+          swatches={swatches}
         />
       </div>
 
@@ -168,7 +172,7 @@ export const EffectsAndMotionSection: React.FC<EffectsAndMotionSectionProps> = (
           />
         </label>
 
-        <div className="pt-1.5 border-t border-black/10 space-y-1.5">
+        <div className="pt-1.5 border-t border-[var(--border-main)] space-y-1.5">
           <label className="flex items-center gap-2 cursor-pointer text-[10px]">
             <input
               type="checkbox"
@@ -204,7 +208,7 @@ export const EffectsAndMotionSection: React.FC<EffectsAndMotionSectionProps> = (
           )}
         </div>
 
-        <div className="pt-1.5 border-t border-black/10">
+        <div className="pt-1.5 border-t border-[var(--border-main)]">
           <label className="flex items-center gap-2 cursor-pointer text-[10px]">
             <input
               type="checkbox"

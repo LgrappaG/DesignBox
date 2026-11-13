@@ -6,6 +6,13 @@ import {
 } from '../types/schema';
 import { PURE_SURFACE_RECIPES } from '../data/purePrimitives';
 import { FaIconBrowser } from './shared/FaIconBrowser';
+import { StudioColorButton } from './shared/StudioColorPicker';
+import {
+  buildUniformBorderPatch,
+  getDisplayBorderColor,
+  getDisplayBorderStyle,
+  getDisplayBorderWidth,
+} from '../utils/borderHelpers';
 import {
   Box,
   Layers,
@@ -21,6 +28,7 @@ interface PureInspectorProps {
   el: DesignElement;
   updateSelected: (patch: Partial<DesignElement>) => void;
   isToyhouseFree: boolean;
+  swatches?: string[];
 }
 
 const BOX_SHAPE_OPTIONS: ReadonlyArray<{ id: ImageShape; label: string; f2u: boolean }> = [
@@ -92,7 +100,7 @@ export const PureSurfaceSculptorSection: React.FC<PureInspectorProps> = ({
       </div>
 
       {!isImg && el.type !== 'fa_watermark' && (
-        <div className="pt-2 border-t border-black/10 space-y-1.5">
+        <div className="pt-2 border-t border-[var(--border-main)] space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="font-semibold text-[10.5px] flex items-center gap-1">
               <Scissors className="w-3 h-3" style={{ color: 'var(--accent)' }} />
@@ -136,10 +144,12 @@ export const PureSurfaceSculptorSection: React.FC<PureInspectorProps> = ({
 export const BoxModelInspectorSection: React.FC<PureInspectorProps> = ({
   el,
   updateSelected,
+  swatches,
 }) => {
   const padLinked = el.paddingLinked !== false;
   const marLinked = el.marginLinked !== false;
-  const brdLinked = el.bordersLinked !== false;
+  const isLine = el.type === 'pure_line';
+  const brdLinked = isLine ? true : el.bordersLinked !== false;
 
   const setAllPadding = (v: number) =>
     updateSelected({ padding: v, paddingT: v, paddingR: v, paddingB: v, paddingL: v });
@@ -236,7 +246,7 @@ export const BoxModelInspectorSection: React.FC<PureInspectorProps> = ({
       </div>
 
       {/* 4-Side Margin */}
-      <div className="space-y-1 pt-1 border-t border-black/10">
+      <div className="space-y-1 pt-1 border-t border-[var(--border-main)]">
         <div className="flex items-center justify-between text-[10px]">
           <span style={{ color: 'var(--text-muted)' }}>Margin (Outer px — Grid/Flow)</span>
           <button
@@ -285,89 +295,118 @@ export const BoxModelInspectorSection: React.FC<PureInspectorProps> = ({
       </div>
 
       {/* Borders (Uniform or 4-Side Accent Rails) */}
-      <div className="space-y-1.5 pt-1 border-t border-black/10">
+      <div className="space-y-1.5 pt-1 border-t border-[var(--border-main)]">
         <div className="flex items-center justify-between text-[10px]">
           <span style={{ color: 'var(--text-muted)' }}>
-            {brdLinked ? 'Uniform Border' : 'Per-Side Borders (Accent Rails)'}
+            {isLine ? 'Line Border (Top Stroke)' : brdLinked ? 'Uniform Border' : 'Per-Side Borders (Accent Rails)'}
           </span>
-          <button
-            type="button"
-            onClick={() => {
-              if (brdLinked) {
-                updateSelected({
-                  bordersLinked: false,
-                  borderTopWidth: el.borderTopWidth ?? el.borderWidth ?? 1,
-                  borderTopStyle: el.borderTopStyle || el.borderStyle || 'solid',
-                  borderTopColor: el.borderTopColor || el.borderColor,
-                  borderRightWidth: el.borderRightWidth ?? el.borderWidth ?? 1,
-                  borderRightStyle: el.borderRightStyle || el.borderStyle || 'solid',
-                  borderRightColor: el.borderRightColor || el.borderColor,
-                  borderBottomWidth: el.borderBottomWidth ?? el.borderWidth ?? 1,
-                  borderBottomStyle: el.borderBottomStyle || el.borderStyle || 'solid',
-                  borderBottomColor: el.borderBottomColor || el.borderColor,
-                  borderLeftWidth: el.borderLeftWidth ?? el.borderWidth ?? 1,
-                  borderLeftStyle: el.borderLeftStyle || el.borderStyle || 'solid',
-                  borderLeftColor: el.borderLeftColor || el.borderColor,
-                });
-              } else {
-                updateSelected({ bordersLinked: true });
-              }
-            }}
-            style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-            className="flex items-center gap-1 border px-1.5 py-0.5 rounded-[4px] text-[9px] font-mono"
-          >
-            {brdLinked ? <LinkIcon className="w-2.5 h-2.5" /> : <Unlink className="w-2.5 h-2.5" />}
-            <span>{brdLinked ? 'Uniform' : '4-Side'}</span>
-          </button>
+          {!isLine && (
+            <button
+              type="button"
+              onClick={() => {
+                if (brdLinked) {
+                  updateSelected({
+                    bordersLinked: false,
+                    borderTopWidth: el.borderTopWidth ?? el.borderWidth ?? 1,
+                    borderTopStyle: el.borderTopStyle || el.borderStyle || 'solid',
+                    borderTopColor: el.borderTopColor || el.borderColor,
+                    borderRightWidth: el.borderRightWidth ?? el.borderWidth ?? 1,
+                    borderRightStyle: el.borderRightStyle || el.borderStyle || 'solid',
+                    borderRightColor: el.borderRightColor || el.borderColor,
+                    borderBottomWidth: el.borderBottomWidth ?? el.borderWidth ?? 1,
+                    borderBottomStyle: el.borderBottomStyle || el.borderStyle || 'solid',
+                    borderBottomColor: el.borderBottomColor || el.borderColor,
+                    borderLeftWidth: el.borderLeftWidth ?? el.borderWidth ?? 1,
+                    borderLeftStyle: el.borderLeftStyle || el.borderStyle || 'solid',
+                    borderLeftColor: el.borderLeftColor || el.borderColor,
+                  });
+                } else {
+                  updateSelected(
+                    buildUniformBorderPatch(el, {
+                      borderWidth: getDisplayBorderWidth(el),
+                      borderStyle: getDisplayBorderStyle(el),
+                      borderColor: getDisplayBorderColor(el),
+                    })
+                  );
+                }
+              }}
+              style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+              className="flex items-center gap-1 border px-1.5 py-0.5 rounded-[4px] text-[9px] font-mono"
+            >
+              {brdLinked ? <LinkIcon className="w-2.5 h-2.5" /> : <Unlink className="w-2.5 h-2.5" />}
+              <span>{brdLinked ? 'Uniform' : '4-Side'}</span>
+            </button>
+          )}
         </div>
 
         {brdLinked ? (
-          <div className="grid grid-cols-[52px_1fr_28px] gap-1 items-center text-[10px]">
-            <input
-              type="number"
-              min={0}
-              max={24}
-              value={el.borderWidth ?? 0}
-              onChange={(e) =>
-                updateSelected({ borderWidth: Math.max(0, parseInt(e.target.value, 10) || 0) })
-              }
-              style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-              className="border rounded-[4px] px-1 py-0.5 font-mono text-center"
-              title="Border Width (px)"
-            />
-            <select
-              value={el.borderStyle || 'solid'}
-              onChange={(e) =>
-                updateSelected({ borderStyle: e.target.value as BorderStyle })
-              }
-              style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-              className="border rounded-[4px] px-1.5 py-0.5 text-[10px]"
-            >
-              <option value="solid">Solid</option>
-              <option value="dashed">Dashed</option>
-              <option value="dotted">Dotted</option>
-              <option value="double">Double</option>
-              <option value="groove">Groove</option>
-              <option value="ridge">Ridge</option>
-              <option value="inset">Inset</option>
-              <option value="outset">Outset</option>
-            </select>
-            <input
-              type="color"
-              value={
-                (el.borderColor || '#E5E5E5').startsWith('#')
-                  ? el.borderColor
-                  : '#E5E5E5'
-              }
-              onChange={(e) => updateSelected({ borderColor: e.target.value })}
-              className="w-6 h-5 cursor-pointer bg-transparent border-0 p-0"
-              title="Border Color"
-            />
+          <div className="space-y-1">
+            <div className="grid grid-cols-[54px_1fr_92px] gap-1 text-[8.5px] font-mono uppercase tracking-wider px-0.5" style={{ color: 'var(--text-muted)' }}>
+              <span>Width (px)</span>
+              <span>Style</span>
+              <span>Color</span>
+            </div>
+            <div className="grid grid-cols-[54px_1fr_92px] gap-1 items-center text-[10px]">
+              <input
+                type="number"
+                min={isLine ? 1 : 0}
+                max={24}
+                value={getDisplayBorderWidth(el)}
+                onChange={(e) =>
+                  updateSelected(
+                    buildUniformBorderPatch(el, {
+                      borderWidth: parseInt(e.target.value, 10) || 0,
+                    })
+                  )
+                }
+                style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+                className="border rounded-[4px] px-1 py-1 font-mono text-center h-7"
+                title="Border Width (px)"
+              />
+              <select
+                value={getDisplayBorderStyle(el)}
+                onChange={(e) =>
+                  updateSelected(
+                    buildUniformBorderPatch(el, {
+                      borderStyle: e.target.value as BorderStyle,
+                    })
+                  )
+                }
+                style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+                className="border rounded-[4px] px-1.5 py-1 text-[10px] h-7"
+              >
+                <option value="solid">Solid</option>
+                <option value="dashed">Dashed</option>
+                <option value="dotted">Dotted</option>
+                <option value="double">Double</option>
+                <option value="groove">Groove</option>
+                <option value="ridge">Ridge</option>
+                <option value="inset">Inset</option>
+                <option value="outset">Outset</option>
+              </select>
+              <StudioColorButton
+                value={getDisplayBorderColor(el)}
+                onChange={(nextColor) =>
+                  updateSelected(buildUniformBorderPatch(el, { borderColor: nextColor }))
+                }
+                fallbackHex="#E5E5E5"
+                swatches={swatches}
+                fullWidth
+                title="Uniform Border Color"
+                className="h-7 px-1.5"
+              />
+            </div>
           </div>
         ) : (
           <div className="space-y-1">
+            <div className="grid grid-cols-[42px_46px_1fr_32px] gap-1 text-[8.5px] font-mono uppercase tracking-wider px-0.5" style={{ color: 'var(--text-muted)' }}>
+              <span>Side</span>
+              <span>Px</span>
+              <span>Style</span>
+              <span className="text-center">Col</span>
+            </div>
             {sides.map((s) => (
-              <div key={s.key} className="grid grid-cols-[42px_44px_1fr_24px] gap-1 items-center text-[10px]">
+              <div key={s.key} className="grid grid-cols-[42px_46px_1fr_32px] gap-1 items-center text-[10px]">
                 <span className="font-mono text-[9px] opacity-70">{s.short}</span>
                 <input
                   type="number"
@@ -378,7 +417,7 @@ export const BoxModelInspectorSection: React.FC<PureInspectorProps> = ({
                     updateSelected({ [s.wKey]: Math.max(0, parseInt(e.target.value, 10) || 0) } as Partial<DesignElement>)
                   }
                   style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                  className="border rounded-[4px] px-1 py-0.5 font-mono text-center"
+                  className="border rounded-[4px] px-1 py-1 font-mono text-center h-7"
                 />
                 <select
                   value={(el[s.sKey] as BorderStyle | undefined) || el.borderStyle || 'solid'}
@@ -386,7 +425,7 @@ export const BoxModelInspectorSection: React.FC<PureInspectorProps> = ({
                     updateSelected({ [s.sKey]: e.target.value as BorderStyle } as Partial<DesignElement>)
                   }
                   style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                  className="border rounded-[4px] px-1 py-0.5 text-[10px]"
+                  className="border rounded-[4px] px-1 py-1 text-[10px] h-7"
                 >
                   <option value="solid">Solid</option>
                   <option value="dashed">Dashed</option>
@@ -397,13 +436,15 @@ export const BoxModelInspectorSection: React.FC<PureInspectorProps> = ({
                   <option value="inset">Inset</option>
                   <option value="outset">Outset</option>
                 </select>
-                <input
-                  type="color"
-                  value={((el[s.cKey] as string | undefined) || el.borderColor || '#E5E5E5').startsWith('#') ? ((el[s.cKey] as string | undefined) || el.borderColor) : '#E5E5E5'}
-                  onChange={(e) =>
-                    updateSelected({ [s.cKey]: e.target.value } as Partial<DesignElement>)
+                <StudioColorButton
+                  compact
+                  value={(el[s.cKey] as string | undefined) || el.borderColor}
+                  onChange={(nextColor) =>
+                    updateSelected({ [s.cKey]: nextColor } as Partial<DesignElement>)
                   }
-                  className="w-6 h-5 cursor-pointer bg-transparent border-0 p-0"
+                  fallbackHex="#E5E5E5"
+                  swatches={swatches}
+                  title={`${s.key} Border Color`}
                 />
               </div>
             ))}
@@ -418,6 +459,7 @@ export const BoxModelInspectorSection: React.FC<PureInspectorProps> = ({
 export const GradientAndBgImageSection: React.FC<PureInspectorProps> = ({
   el,
   updateSelected,
+  swatches,
 }) => {
   return (
     <div
@@ -468,18 +510,20 @@ export const GradientAndBgImageSection: React.FC<PureInspectorProps> = ({
             title="Gradient Angle (deg)"
           />
           <div className="flex items-center gap-1 justify-end">
-            <input
-              type="color"
+            <StudioColorButton
+              compact
               value={el.bgGradientMid || el.bgColor}
-              onChange={(e) => updateSelected({ bgGradientMid: e.target.value })}
-              className="w-5 h-5 cursor-pointer bg-transparent border-0 p-0"
-              title="Optional Middle Stop Color"
+              onChange={(nextColor) => updateSelected({ bgGradientMid: nextColor })}
+              fallbackHex="#FAF8F5"
+              swatches={swatches}
+              title="Optional Middle Gradient Stop Color"
             />
-            <input
-              type="color"
+            <StudioColorButton
+              compact
               value={el.bgGradientTo || el.bgColor}
-              onChange={(e) => updateSelected({ bgGradientTo: e.target.value })}
-              className="w-5 h-5 cursor-pointer bg-transparent border-0 p-0"
+              onChange={(nextColor) => updateSelected({ bgGradientTo: nextColor })}
+              fallbackHex="#FAF8F5"
+              swatches={swatches}
               title="End Gradient Color"
             />
           </div>
@@ -487,7 +531,7 @@ export const GradientAndBgImageSection: React.FC<PureInspectorProps> = ({
       </div>
 
       {/* Container Background Image (F2U Parallax & Textures!) */}
-      <div className="space-y-1.5 pt-1.5 border-t border-black/10 text-[10px]">
+      <div className="space-y-1.5 pt-1.5 border-t border-[var(--border-main)] text-[10px]">
         <span style={{ color: 'var(--text-muted)' }} className="block">
           Container Background Image URL (F2U Inline BG)
         </span>
@@ -637,7 +681,7 @@ export const CustomShadowInspectorSection: React.FC<PureInspectorProps> = ({
         </div>
       )}
 
-      <label className="flex items-center justify-between cursor-pointer pt-1 border-t border-black/10">
+      <label className="flex items-center justify-between cursor-pointer pt-1 border-t border-[var(--border-main)]">
         <span className="font-medium">Custom Text Shadow (X/Y/Blur)</span>
         <input
           type="checkbox"
@@ -862,7 +906,7 @@ export const F2UBootstrapAndFaSection: React.FC<PureInspectorProps> = ({
       </div>
 
       {/* Font Awesome Icon + Size + Stack */}
-      <div className="space-y-1.5 pt-1.5 border-t border-black/10 text-[10px]">
+      <div className="space-y-1.5 pt-1.5 border-t border-[var(--border-main)] text-[10px]">
         <div className="flex items-center justify-between">
           <span style={{ color: 'var(--text-muted)' }}>Inline Font Awesome Icon</span>
           {el.faIcon && (
@@ -965,6 +1009,7 @@ export const F2UBootstrapAndFaSection: React.FC<PureInspectorProps> = ({
 export const F2UInteractionAndAtomsSection: React.FC<PureInspectorProps> = ({
   el,
   updateSelected,
+  swatches,
 }) => {
   return (
     <div
@@ -1048,11 +1093,14 @@ export const F2UInteractionAndAtomsSection: React.FC<PureInspectorProps> = ({
         <div className="space-y-1.5 text-[10px]">
           <div className="flex items-center justify-between gap-2">
             <span style={{ color: 'var(--text-muted)' }}>Bar Fill Color</span>
-            <input
-              type="color"
+            <StudioColorButton
               value={el.progressBarColor || '#4B5563'}
-              onChange={(e) => updateSelected({ progressBarColor: e.target.value })}
-              className="w-6 h-5 cursor-pointer bg-transparent border-0 p-0"
+              onChange={(nextColor) => updateSelected({ progressBarColor: nextColor })}
+              fallbackHex="#4B5563"
+              allowTransparent={false}
+              swatches={swatches}
+              title="Progress Bar Fill Color"
+              className="h-7 px-1.5"
             />
           </div>
           <div className="flex items-center gap-3">
@@ -1114,7 +1162,7 @@ export const F2UInteractionAndAtomsSection: React.FC<PureInspectorProps> = ({
       </div>
 
       {/* Cursor, Pointer Events & User Select */}
-      <div className="grid grid-cols-3 gap-1.5 pt-1.5 border-t border-black/10 text-[10px]">
+      <div className="grid grid-cols-3 gap-1.5 pt-1.5 border-t border-[var(--border-main)] text-[10px]">
         <label>
           <span style={{ color: 'var(--text-muted)' }} className="block mb-0.5">Cursor</span>
           <select

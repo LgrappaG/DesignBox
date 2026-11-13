@@ -72,6 +72,7 @@ import {
   TargetPlatform,
 } from '../types/schema';
 import { getInnerBoxGeometry, getSplitPaneGeometry } from '../utils/canvasGeometry';
+import { StudioColorButton } from './shared/StudioColorPicker';
 
 export interface CanvasStageProps {
   elements: DesignElement[];
@@ -123,6 +124,7 @@ export interface CanvasStageProps {
   previewViewport: PreviewViewport;
   rightCollapsed: boolean;
   copied: boolean;
+  swatches?: string[];
   canvasRef: React.RefObject<HTMLDivElement>;
   canvasViewportRef: React.RefObject<HTMLDivElement>;
   canvasTransformRef: React.RefObject<HTMLDivElement>;
@@ -243,6 +245,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
   previewViewport,
   rightCollapsed,
   copied,
+  swatches,
   canvasRef,
   canvasViewportRef,
   canvasTransformRef,
@@ -320,18 +323,18 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
       {/* Top Canvas Controls Bar */}
       <div
         style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-main)' }}
-        className="h-10 border-b px-3 flex items-center justify-between text-[11px] shrink-0 gap-2 overflow-x-auto"
+        className="min-h-10 py-1 border-b px-2.5 flex flex-wrap items-center justify-between text-[11px] shrink-0 gap-1.5"
       >
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center flex-wrap gap-1.5 min-w-0">
           <span
-            className="font-mono text-[10px] min-w-[92px] tabular-nums"
+            className="font-mono text-[10px] min-w-[78px] tabular-nums"
             style={{ color: 'var(--text-muted)' }}
           >
             X:{cursorCoords.x} Y:{cursorCoords.y}
           </span>
-          <span style={{ color: 'var(--border-strong)' }}>|</span>
+          <span style={{ color: 'var(--border-strong)' }} className="hidden sm:inline">|</span>
 
-          <div className="flex items-center gap-1 font-mono text-[10px]">
+          <div className="flex items-center flex-wrap gap-1 font-mono text-[10px]">
             <span style={{ color: 'var(--text-muted)' }}>SIZE:</span>
             <select
               value={
@@ -351,7 +354,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                 backgroundColor: 'var(--bg-input)',
                 borderColor: 'var(--border-strong)',
               }}
-              className="border rounded-[5px] px-1.5 py-0.5"
+              className="border rounded-[5px] px-1.5 py-0.5 max-w-[140px]"
             >
               <option value="760x540">Standard (760×540)</option>
               <option value="860x680">Wide Dossier (860×680)</option>
@@ -376,7 +379,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                 backgroundColor: 'var(--bg-input)',
                 borderColor: 'var(--border-strong)',
               }}
-              className="w-14 border rounded-[5px] px-1 py-0.5 text-center font-mono text-[11px]"
+              className="w-12 border rounded-[5px] px-1 py-0.5 text-center font-mono text-[11px]"
               title="Custom Canvas Width (px)"
             />
             <span>×</span>
@@ -396,21 +399,24 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                 backgroundColor: 'var(--bg-input)',
                 borderColor: 'var(--border-strong)',
               }}
-              className="w-14 border rounded-[5px] px-1 py-0.5 text-center font-mono text-[11px]"
+              className="w-12 border rounded-[5px] px-1 py-0.5 text-center font-mono text-[11px]"
               title="Custom Canvas Height (px)"
             />
           </div>
 
-          <span style={{ color: 'var(--border-strong)' }}>|</span>
+          <span style={{ color: 'var(--border-strong)' }} className="hidden sm:inline">|</span>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center flex-wrap gap-1.5">
             <span style={{ color: 'var(--text-muted)' }}>Bg:</span>
-            <input
-              type="color"
-              value={canvasBg === 'transparent' ? '#FAF8F5' : canvasBg}
-              onChange={(e) => onChangeCanvasBg(e.target.value)}
-              className="w-4 h-4 rounded-[3px] cursor-pointer border-0 bg-transparent"
+            <StudioColorButton
+              compact
+              value={canvasBg}
+              onChange={onChangeCanvasBg}
+              fallbackHex="#FAF8F5"
+              allowTransparent
+              swatches={swatches}
               title="Canvas Background Color"
+              className="h-6 px-1"
             />
             <button
               type="button"
@@ -510,7 +516,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex items-center flex-wrap gap-2 shrink-0">
           {layoutMode === 'hybrid' && (
             <label className="flex items-center gap-1 cursor-pointer">
               <input
@@ -592,9 +598,9 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
       {layoutMode !== 'block' && (
         <div
           style={{ backgroundColor: 'var(--bg-panel-alt)', borderColor: 'var(--border-main)' }}
-          className="min-h-8 border-b px-3 py-1 flex items-center justify-between gap-2 text-[10.5px] shrink-0 overflow-x-auto"
+          className="min-h-8 border-b px-2.5 py-1 flex flex-wrap items-center justify-between gap-1.5 text-[10.5px] shrink-0"
         >
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center flex-wrap gap-1 min-w-0">
             <span
               style={{ color: 'var(--text-muted)' }}
               className="font-mono text-[9.5px] uppercase mr-1"
@@ -663,7 +669,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center flex-wrap gap-1 min-w-0">
             {editingContainer && (
               <div className="flex items-center gap-1.5 bg-amber-500/15 border border-amber-500/40 text-amber-500 px-2 py-0.5 rounded-[5px] mr-1">
                 <Focus className="w-3 h-3" />
@@ -1744,7 +1750,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
               borderColor: 'var(--border-strong)',
               boxShadow: '0 8px 30px rgba(0,0,0,0.18)',
             }}
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[95] border rounded-lg px-3 py-1.5 flex items-center gap-2.5 text-xs shadow-xl animate-in fade-in slide-in-from-bottom-2 duration-200"
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[95] border rounded-lg px-2.5 py-1.5 max-w-[calc(100%-20px)] flex flex-wrap items-center justify-center gap-1.5 text-xs shadow-xl animate-in fade-in slide-in-from-bottom-2 duration-200"
           >
             <div className="flex items-center gap-1.5 font-mono text-[11px] font-semibold text-accent">
               <span
@@ -1937,9 +1943,9 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
       {/* Bottom Status Bar */}
       <div
         style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-main)' }}
-        className="h-8 border-t px-3 flex items-center justify-between text-[11px] shrink-0"
+        className="min-h-8 py-1 border-t px-2.5 flex flex-wrap items-center justify-between gap-1.5 text-[11px] shrink-0"
       >
-        <div className="flex items-center gap-3">
+        <div className="flex items-center flex-wrap gap-2.5 min-w-0">
           <span style={{ color: 'var(--text-muted)' }}>
             Solver:{' '}
             <strong style={{ color: 'var(--text-main)' }}>
@@ -1966,7 +1972,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center flex-wrap gap-1.5">
           <button
             type="button"
             onClick={() => {

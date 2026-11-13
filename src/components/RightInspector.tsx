@@ -259,7 +259,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                     borderBottomColor: isActive ? 'var(--accent)' : 'transparent',
                     color: isActive ? 'var(--text-main)' : 'var(--text-muted)',
                   }}
-                  className="relative py-2 px-1 text-[10.5px] font-semibold border-b-2 transition flex items-center justify-center gap-1 truncate"
+                  className="relative py-2 px-1 min-w-0 text-[10.5px] font-semibold border-b-2 transition flex items-center justify-center gap-1 truncate"
                   title={tab.title}
                 >
                   <Icon className="w-3 h-3 shrink-0" />
@@ -280,7 +280,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
         {/* Selected Element Header & Status Banners */}
         {selectedElement && (
           <div style={{ borderColor: 'var(--border-main)' }} className="px-3.5 pt-2.5 pb-2 border-b space-y-2 shrink-0">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-1.5">
               <div className="min-w-0 flex-1">
                 <input
                   type="text"
@@ -491,6 +491,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                     el={selectedElement}
                     updateSelected={onUpdateSelected}
                     isToyhouseFree={isToyhouseFree}
+                    swatches={swatches}
                   />
                   <OverflowAndConstraintsSection
                     el={selectedElement}
@@ -505,6 +506,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                   el={selectedElement}
                   updateSelected={onUpdateSelected}
                   isToyhouseFree={isToyhouseFree}
+                  swatches={swatches}
                 />
               )}
             </div>
@@ -533,6 +535,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                   el={selectedElement}
                   updateSelected={onUpdateSelected}
                   isToyhouseFree={isToyhouseFree}
+                  swatches={swatches}
                 />
                 <RawHtmlCssOverrideSection
                   el={selectedElement}

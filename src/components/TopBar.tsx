@@ -122,9 +122,9 @@ export const TopBar: React.FC<TopBarProps> = ({
   return (
     <header
       style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-main)' }}
-      className="h-11 border-b px-3 flex items-center justify-between shrink-0 relative z-40"
+      className="min-h-11 py-1.5 border-b px-2.5 flex flex-wrap xl:flex-nowrap items-center justify-between gap-x-2 gap-y-1.5 shrink-0 relative z-40"
     >
-      <div className="flex items-center gap-1.5 min-w-0">
+      <div className="flex items-center flex-wrap gap-1 min-w-0">
         <div
           style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
           className="px-2 py-0.5 rounded-[3px] font-mono font-bold text-xs tracking-wider shrink-0"
@@ -132,18 +132,18 @@ export const TopBar: React.FC<TopBarProps> = ({
           DBX
         </div>
         <div className="flex items-center gap-1 min-w-0">
-          <span className="font-semibold text-xs tracking-tight shrink-0">DesignBox</span>
+          <span className="font-semibold text-xs tracking-tight shrink-0 hidden sm:inline">DesignBox</span>
           <span
             title={currentFilePath || 'Unsaved active workspace (stored in autosave)'}
             style={{ color: 'var(--text-muted)' }}
-            className="text-[10px] font-mono truncate max-w-[115px] hidden xl:inline"
+            className="text-[10px] font-mono truncate max-w-[115px] hidden 2xl:inline"
           >
             · {projectName}
             {isDirty ? '*' : ''}
           </span>
         </div>
 
-        <div style={{ backgroundColor: 'var(--border-main)' }} className="h-4 w-px mx-1 shrink-0" />
+        <div style={{ backgroundColor: 'var(--border-main)' }} className="h-4 w-px mx-0.5 shrink-0 hidden sm:block" />
 
         <button
           onClick={onNewBlankCanvas}
@@ -155,7 +155,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           title="Start with a fresh blank canvas"
         >
           <FilePlus2 className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
-          <span>Blank</span>
+          <span className="hidden xl:inline">Blank</span>
         </button>
 
         <button
@@ -165,6 +165,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             borderColor: 'var(--accent)',
           }}
           className="flex items-center gap-1 px-2 py-1 rounded-[7px] text-xs font-semibold border hover:opacity-90 transition shrink-0"
+          title="Object Forge"
         >
           <Cpu className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
           <span>+ Forge</span>
@@ -180,7 +181,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           title="Import Toyhouse HTML markup into editable blocks & custom widgets"
         >
           <FileCode2 className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
-          <span>Import HTML</span>
+          <span className="hidden 2xl:inline">Import HTML</span>
         </button>
 
         <button
@@ -190,19 +191,20 @@ export const TopBar: React.FC<TopBarProps> = ({
             borderColor: 'var(--border-strong)',
           }}
           className="flex items-center gap-1 px-2 py-1 rounded-[7px] text-xs font-medium border hover:opacity-90 transition shrink-0"
+          title="Presets & Templates"
         >
           <LayoutTemplate className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
-          <span>Presets</span>
+          <span className="hidden xl:inline">Presets</span>
         </button>
 
-        <div className="relative flex items-center" ref={recentMenuRef}>
+        <div className="relative flex items-center shrink-0" ref={recentMenuRef}>
           <button
             onClick={onOpenProject}
             className="flex items-center gap-1 px-1.5 py-1 rounded-l-[6px] text-xs hover:opacity-80"
             title="Open .dbx.json project (Ctrl+O)"
           >
             <FolderOpen className="w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />
-            <span>Open</span>
+            <span className="hidden xl:inline">Open</span>
           </button>
           <button
             type="button"
@@ -322,7 +324,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           ) : (
             <Save className="w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />
           )}
-          <span>{saveNotice ? 'Saved!' : 'Save'}</span>
+          <span className="hidden xl:inline">{saveNotice ? 'Saved!' : 'Save'}</span>
         </button>
 
         <button
@@ -362,7 +364,7 @@ export const TopBar: React.FC<TopBarProps> = ({
       {/* Center: 3 Layout Modes Switcher */}
       <div
         style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}
-        className="flex items-center p-0.5 rounded-[8px] border shrink-0"
+        className="flex items-center p-0.5 rounded-[8px] border shrink-0 max-w-full overflow-x-auto"
       >
         {(
           [
@@ -382,36 +384,36 @@ export const TopBar: React.FC<TopBarProps> = ({
                   ? { backgroundColor: 'var(--accent)', color: '#fff' }
                   : { color: 'var(--text-muted)' }
               }
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-[11px] font-medium transition"
+              className="flex items-center gap-1 px-2 py-1 rounded-[6px] text-[11px] font-medium transition whitespace-nowrap"
             >
-              <Icon className="w-3 h-3" />
-              <span className="hidden lg:inline">{m.label}</span>
-              <span className="lg:hidden">{m.label.replace(/^\d+\.\s*/, '')}</span>
+              <Icon className="w-3 h-3 shrink-0" />
+              <span className="hidden 2xl:inline">{m.label}</span>
+              <span className="2xl:hidden">{m.label.replace(/^\d+\.\s*/, '')}</span>
             </button>
           );
         })}
       </div>
 
       {/* Right Controls */}
-      <div className="flex items-center gap-1.5 shrink-0">
+      <div className="flex items-center flex-wrap gap-1 min-w-0">
         <button
           onClick={onToggleTheme}
           style={{
             backgroundColor: 'var(--bg-panel-alt)',
             borderColor: 'var(--border-strong)',
           }}
-          className="flex items-center gap-1 px-2 py-1 rounded-[7px] border text-[11px] font-medium"
+          className="flex items-center gap-1 px-2 py-1 rounded-[7px] border text-[11px] font-medium shrink-0"
           title="Switch between Warm Oatmeal Paper UI & Cozy Carbon Dark UI"
         >
           {uiTheme === 'carbon' ? (
             <>
               <Sun className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden xl:inline">Paper</span>
+              <span className="hidden 2xl:inline">Paper</span>
             </>
           ) : (
             <>
               <Moon className="w-3.5 h-3.5 text-stone-700" />
-              <span className="hidden xl:inline">Carbon</span>
+              <span className="hidden 2xl:inline">Carbon</span>
             </>
           )}
         </button>
@@ -424,7 +426,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             borderColor: 'var(--border-strong)',
             color: 'var(--text-main)',
           }}
-          className="border rounded-[7px] px-2 py-1 text-[11px] font-medium focus:outline-none max-w-[185px]"
+          className="border rounded-[7px] px-1.5 py-1 text-[11px] font-medium focus:outline-none min-w-0 max-w-[140px] sm:max-w-[165px] xl:max-w-[185px]"
         >
           <option value="toyhouse_free">Toyhouse · Free (F2U - No Premium)</option>
           <option value="toyhouse_premium">Toyhouse · Premium (Custom CSS)</option>
@@ -436,7 +438,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         <div
           style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}
-          className="flex items-center border rounded-[7px]"
+          className="flex items-center border rounded-[7px] shrink-0"
         >
           <button
             onClick={onUndo}
@@ -471,11 +473,11 @@ export const TopBar: React.FC<TopBarProps> = ({
                   borderColor: 'var(--border-strong)',
                 }
           }
-          className="flex items-center gap-1 px-2 py-1 rounded-[7px] border text-[11px] font-medium hover:opacity-90 transition"
+          className="flex items-center gap-1 px-2 py-1 rounded-[7px] border text-[11px] font-medium hover:opacity-90 transition shrink-0"
           title="Toggle Blender-style Bottom Dock (Live HTML & Interactive Preview)"
         >
           <PanelBottom className="w-3.5 h-3.5" />
-          <span className="hidden xl:inline">Dock</span>
+          <span className="hidden 2xl:inline">Dock</span>
         </button>
 
         <button
@@ -484,19 +486,21 @@ export const TopBar: React.FC<TopBarProps> = ({
             backgroundColor: 'var(--bg-panel-alt)',
             borderColor: 'var(--border-strong)',
           }}
-          className="flex items-center gap-1 px-2 py-1 rounded-[7px] border text-[11px] font-medium hover:opacity-90"
+          className="flex items-center gap-1 px-2 py-1 rounded-[7px] border text-[11px] font-medium hover:opacity-90 shrink-0"
+          title="Interactive Live Preview"
         >
           <Eye className="w-3.5 h-3.5" />
-          <span>Preview</span>
+          <span className="hidden md:inline">Preview</span>
         </button>
 
         <button
           onClick={onCopyCode}
           style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
-          className="flex items-center gap-1 px-2.5 py-1 rounded-[7px] text-[11px] font-semibold hover:opacity-95 transition"
+          className="flex items-center gap-1 px-2.5 py-1 rounded-[7px] text-[11px] font-semibold hover:opacity-95 transition shrink-0"
+          title="Copy Generated HTML"
         >
           {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-          <span>{copied ? 'Copied' : 'Copy Code'}</span>
+          <span>{copied ? 'Copied' : 'Copy'}</span>
         </button>
       </div>
     </header>

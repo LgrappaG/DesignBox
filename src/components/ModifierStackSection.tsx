@@ -25,6 +25,7 @@ import {
   SplitModifier,
 } from '../types/schema';
 import { isModifierProOnly } from '../engine/modifierRenderer';
+import { StudioColorButton } from './shared/StudioColorPicker';
 
 export function createDefaultModifier(
   kind: ModifierKind,
@@ -117,6 +118,7 @@ interface ModifierStackProps {
   el: DesignElement;
   updateSelected: (patch: Partial<DesignElement>) => void;
   isToyhouseFree: boolean;
+  swatches?: string[];
 }
 
 const BORDER_STYLES: BorderStyle[] = ['solid', 'dashed', 'dotted', 'double'];
@@ -125,6 +127,7 @@ export const ModifierStackSection: React.FC<ModifierStackProps> = ({
   el,
   updateSelected,
   isToyhouseFree,
+  swatches,
 }) => {
   const mods = el.modifiers || [];
 
@@ -525,17 +528,20 @@ export const ModifierStackSection: React.FC<ModifierStackProps> = ({
                             ))}
                           </select>
                         </label>
-                        <label>
+                        <div>
                           <span style={{ color: 'var(--text-muted)' }} className="block text-[9px] mb-0.5">
                             Line Color
                           </span>
-                          <input
-                            type="color"
+                          <StudioColorButton
                             value={s.dividerColor || '#18181B'}
-                            onChange={(e) => updateModifier(s.id, { dividerColor: e.target.value })}
-                            className="w-full h-6 rounded border cursor-pointer"
+                            onChange={(nextColor) => updateModifier(s.id, { dividerColor: nextColor })}
+                            fallbackHex="#18181B"
+                            swatches={swatches}
+                            fullWidth
+                            title="Split Divider Line Color"
+                            className="h-7 px-1.5"
                           />
-                        </label>
+                        </div>
                       </div>
 
                       {/* Per-Pane Fill & Text */}
@@ -552,11 +558,15 @@ export const ModifierStackSection: React.FC<ModifierStackProps> = ({
                             </button>
                           </div>
                           <div className="flex items-center gap-1">
-                            <input
-                              type="color"
-                              value={s.pane1Bg && s.pane1Bg !== 'inherit' ? s.pane1Bg : '#18181B'}
-                              onChange={(e) => updateModifier(s.id, { pane1Bg: e.target.value })}
-                              className="w-7 h-6 rounded border cursor-pointer shrink-0"
+                            <StudioColorButton
+                              compact
+                              value={s.pane1Bg || 'inherit'}
+                              onChange={(nextColor) => updateModifier(s.id, { pane1Bg: nextColor })}
+                              fallbackHex="#18181B"
+                              allowInherit
+                              inheritLabel="Inherit"
+                              swatches={swatches}
+                              title="Pane 1 Background Fill"
                             />
                             <input
                               type="text"
@@ -564,7 +574,7 @@ export const ModifierStackSection: React.FC<ModifierStackProps> = ({
                               value={s.pane1Text || ''}
                               onChange={(e) => updateModifier(s.id, { pane1Text: e.target.value })}
                               style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                              className="w-full border rounded px-1.5 py-0.5 text-[9.5px]"
+                              className="w-full min-w-0 border rounded px-1.5 py-0.5 text-[9.5px]"
                             />
                           </div>
                         </div>
@@ -581,11 +591,15 @@ export const ModifierStackSection: React.FC<ModifierStackProps> = ({
                             </button>
                           </div>
                           <div className="flex items-center gap-1">
-                            <input
-                              type="color"
-                              value={s.pane2Bg && s.pane2Bg !== 'inherit' ? s.pane2Bg : '#FFFFFF'}
-                              onChange={(e) => updateModifier(s.id, { pane2Bg: e.target.value })}
-                              className="w-7 h-6 rounded border cursor-pointer shrink-0"
+                            <StudioColorButton
+                              compact
+                              value={s.pane2Bg || 'inherit'}
+                              onChange={(nextColor) => updateModifier(s.id, { pane2Bg: nextColor })}
+                              fallbackHex="#FFFFFF"
+                              allowInherit
+                              inheritLabel="Inherit"
+                              swatches={swatches}
+                              title="Pane 2 Background Fill"
                             />
                             <input
                               type="text"
@@ -593,7 +607,7 @@ export const ModifierStackSection: React.FC<ModifierStackProps> = ({
                               value={s.pane2Text || ''}
                               onChange={(e) => updateModifier(s.id, { pane2Text: e.target.value })}
                               style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                              className="w-full border rounded px-1.5 py-0.5 text-[9.5px]"
+                              className="w-full min-w-0 border rounded px-1.5 py-0.5 text-[9.5px]"
                             />
                           </div>
                         </div>
@@ -611,11 +625,15 @@ export const ModifierStackSection: React.FC<ModifierStackProps> = ({
                               </button>
                             </div>
                             <div className="flex items-center gap-1">
-                              <input
-                                type="color"
-                                value={s.pane3Bg && s.pane3Bg !== 'inherit' ? s.pane3Bg : '#F4F4F5'}
-                                onChange={(e) => updateModifier(s.id, { pane3Bg: e.target.value })}
-                                className="w-7 h-6 rounded border cursor-pointer shrink-0"
+                              <StudioColorButton
+                                compact
+                                value={s.pane3Bg || 'inherit'}
+                                onChange={(nextColor) => updateModifier(s.id, { pane3Bg: nextColor })}
+                                fallbackHex="#F4F4F5"
+                                allowInherit
+                                inheritLabel="Inherit"
+                                swatches={swatches}
+                                title="Pane 3 Background Fill"
                               />
                               <input
                                 type="text"
@@ -685,16 +703,18 @@ export const ModifierStackSection: React.FC<ModifierStackProps> = ({
                               style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
                               className="border rounded px-1 py-0.5 font-mono text-[9.5px]"
                             />
-                            <input
-                              type="color"
+                            <StudioColorButton
                               value={s.centerBadge.borderColor || '#18181B'}
-                              onChange={(e) =>
+                              onChange={(nextColor) =>
                                 updateModifier(s.id, {
-                                  centerBadge: { ...s.centerBadge!, borderColor: e.target.value },
+                                  centerBadge: { ...s.centerBadge!, borderColor: nextColor },
                                 })
                               }
+                              fallbackHex="#18181B"
+                              swatches={swatches}
+                              fullWidth
                               title="Ring / Border Color"
-                              className="w-full h-6 rounded border cursor-pointer"
+                              className="h-7 px-1.5"
                             />
                             <div className="flex items-center gap-1 col-span-2">
                               <input
@@ -904,17 +924,20 @@ export const ModifierStackSection: React.FC<ModifierStackProps> = ({
                               ))}
                             </select>
                           </label>
-                          <label>
+                          <div>
                             <span style={{ color: 'var(--text-muted)' }} className="block text-[9px] mb-0.5">
                               Ring Color
                             </span>
-                            <input
-                              type="color"
+                            <StudioColorButton
                               value={h.ringColor || '#18181B'}
-                              onChange={(e) => updateModifier(h.id, { ringColor: e.target.value })}
-                              className="w-full h-6 rounded border cursor-pointer"
+                              onChange={(nextColor) => updateModifier(h.id, { ringColor: nextColor })}
+                              fallbackHex="#18181B"
+                              swatches={swatches}
+                              fullWidth
+                              title="Ring Color"
+                              className="h-7 px-1.5"
                             />
-                          </label>
+                          </div>
                         </div>
                       )}
                     </>
@@ -1017,17 +1040,20 @@ export const ModifierStackSection: React.FC<ModifierStackProps> = ({
                             ))}
                           </select>
                         </label>
-                        <label>
+                        <div>
                           <span style={{ color: 'var(--text-muted)' }} className="block text-[9px] mb-0.5">
                             Color
                           </span>
-                          <input
-                            type="color"
+                          <StudioColorButton
                             value={l.color || '#18181B'}
-                            onChange={(e) => updateModifier(l.id, { color: e.target.value })}
-                            className="w-full h-6 rounded border cursor-pointer"
+                            onChange={(nextColor) => updateModifier(l.id, { color: nextColor })}
+                            fallbackHex="#18181B"
+                            swatches={swatches}
+                            fullWidth
+                            title="Divider Line Color"
+                            className="h-7 px-1.5"
                           />
-                        </label>
+                        </div>
                       </div>
                     </>
                   );
@@ -1110,17 +1136,20 @@ export const ModifierStackSection: React.FC<ModifierStackProps> = ({
                             className="w-full border rounded px-1.5 py-0.5 font-mono text-[10px]"
                           />
                         </label>
-                        <label>
+                        <div>
                           <span style={{ color: 'var(--text-muted)' }} className="block text-[9px] mb-0.5">
                             Color
                           </span>
-                          <input
-                            type="color"
+                          <StudioColorButton
                             value={f.color || '#18181B'}
-                            onChange={(e) => updateModifier(f.id, { color: e.target.value })}
-                            className="w-full h-6 rounded border cursor-pointer"
+                            onChange={(nextColor) => updateModifier(f.id, { color: nextColor })}
+                            fallbackHex="#18181B"
+                            swatches={swatches}
+                            fullWidth
+                            title="Inner Frame Color"
+                            className="h-7 px-1.5"
                           />
-                        </label>
+                        </div>
                       </div>
                     </>
                   );

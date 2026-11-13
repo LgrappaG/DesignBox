@@ -1,10 +1,17 @@
 import React from 'react';
 import { Palette } from 'lucide-react';
-import { BgPattern, DesignElement } from '../../types/schema';
+import { BgPattern, BorderStyle, DesignElement } from '../../types/schema';
 import {
   GradientAndBgImageSection,
   PureSurfaceSculptorSection,
 } from '../PureInspectorSections';
+import { StudioColorButton } from '../shared/StudioColorPicker';
+import {
+  buildUniformBorderPatch,
+  getDisplayBorderColor,
+  getDisplayBorderStyle,
+  getDisplayBorderWidth,
+} from '../../utils/borderHelpers';
 
 interface StyleSurfaceAndColorsSectionProps {
   el: DesignElement;
@@ -18,7 +25,18 @@ interface StyleSurfaceAndColorsSectionProps {
   onRemoveSwatch: (hex: string) => void;
 }
 
-/** Direct color pickers, Character Swatches, surface pattern, gradient & surface recipes. */
+const BORDER_STYLES: ReadonlyArray<{ value: BorderStyle; label: string }> = [
+  { value: 'solid', label: 'Solid' },
+  { value: 'dashed', label: 'Dashed' },
+  { value: 'dotted', label: 'Dotted' },
+  { value: 'double', label: 'Double' },
+  { value: 'groove', label: 'Groove' },
+  { value: 'ridge', label: 'Ridge' },
+  { value: 'inset', label: 'Inset' },
+  { value: 'outset', label: 'Outset' },
+];
+
+/** Unified Color Channels (Fill / Border / Text), Border Width & Style, Character Swatches & Surface Pattern. */
 export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSectionProps> = ({
   el,
   updateSelected,
@@ -30,9 +48,60 @@ export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSection
   onApplySwatchColor,
   onRemoveSwatch,
 }) => {
+  const displayBorderWidth = getDisplayBorderWidth(el);
+  const displayBorderStyle = getDisplayBorderStyle(el);
+  const displayBorderColor = getDisplayBorderColor(el);
+  const hasCustomPerSideBorders = el.bordersLinked === false && el.type !== 'pure_line';
+
+  const channels: ReadonlyArray<{
+    key: 'bgColor' | 'borderColor' | 'textColor';
+    label: string;
+    value: string;
+    subtext: string;
+  }> = [
+    {
+      key: 'bgColor',
+      label: 'Fill',
+      value: el.bgColor,
+      subtext: el.bgColor === 'transparent' ? 'Clear' : el.bgColor,
+    },
+    {
+      key: 'borderColor',
+      label: 'Border',
+      value: displayBorderColor,
+      subtext: `${displayBorderWidth}px ${displayBorderStyle}`,
+    },
+    {
+      key: 'textColor',
+      label: 'Text',
+      value: el.textColor,
+      subtext: el.textColor,
+    },
+  ];
+
+  const activeChannelValue =
+    swatchTarget === 'bgColor'
+      ? el.bgColor
+      : swatchTarget === 'borderColor'
+        ? displayBorderColor
+        : el.textColor;
+
+  const activeChannelLabel =
+    swatchTarget === 'bgColor' ? 'Fill' : swatchTarget === 'borderColor' ? 'Border' : 'Text';
+
+  const handleActiveColorChange = (nextColor: string) => {
+    if (swatchTarget === 'bgColor') {
+      updateSelected({ bgColor: nextColor });
+    } else if (swatchTarget === 'borderColor') {
+      updateSelected(buildUniformBorderPatch(el, { borderColor: nextColor }));
+    } else {
+      updateSelected({ textColor: nextColor });
+    }
+  };
+
   return (
     <div className="space-y-3">
-      {/* Direct Colors */}
+      {/* Unified Color, Border, Swatches & Surface Card */}
       <div
         style={{
           backgroundColor: 'var(--bg-panel-alt)',
@@ -40,10 +109,271 @@ export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSection
         }}
         className="p-2.5 rounded-[8px] border space-y-2.5"
       >
-        <div className="font-semibold text-[11px]">Surface Pattern &amp; Colors</div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-semibold text-[11px] flex items-center gap-1.5 min-w-0">
+            <Palette className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--accent)' }} />
+            <span className="truncate">Colors, Border &amp; Surface</span>
+          </span>
+          <button
+            type="button"
+            onClick={onAddSelectedColorToSwatches}
+            style={{ color: 'var(--accent)' }}
+            className="text-[10px] font-mono font-semibold hover:underline shrink-0"
+            title={`Save current ${activeChannelLabel} color to swatches`}
+          >
+            + Save {activeChannelLabel}
+          </button>
+        </div>
 
-        <label className="block">
-          <span style={{ color: 'var(--text-muted)' }} className="block text-[10px] mb-0.5">
+        {/* Target Channel Switcher: Fill | Border | Text */}
+        <div className="grid grid-cols-3 gap-1.5">
+          {channels.map((ch) => {
+            const isActive = swatchTarget === ch.key;
+            const isClear = !ch.value || ch.value === 'transparent';
+            return (
+              <button
+                key={ch.key}
+                type="button"
+                onClick={() => setSwatchTarget(ch.key)}
+                style={{
+                  backgroundColor: isActive ? 'var(--accent-soft)' : 'var(--bg-input)',
+                  borderColor: isActive ? 'var(--accent)' : 'var(--border-main)',
+                }}
+                className="flex flex-col items-start gap-0.5 p-1.5 rounded-[6px] border text-left transition min-w-0 hover:border-[var(--accent)]"
+                title={`Select ${ch.label} channel for picker and swatches`}
+              >
+                <div className="flex items-center gap-1.5 w-full min-w-0">
+                  <span
+                    className="relative w-3.5 h-3.5 rounded-[3px] border border-[var(--border-strong)] shrink-0 overflow-hidden"
+                    style={{
+                      backgroundColor: isClear ? 'transparent' : ch.value,
+                    }}
+                  >
+                    {isClear && (
+                      <span className="block w-[140%] h-[1.5px] bg-red-500 rotate-45 origin-center translate-y-[6px] -translate-x-[3px]" />
+                    )}
+                  </span>
+                  <span className="text-[10px] font-semibold truncate">{ch.label}</span>
+                </div>
+                <span
+                  style={{ color: 'var(--text-muted)' }}
+                  className="text-[9px] font-mono truncate w-full"
+                >
+                  {ch.subtext}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Shared Active Channel Studio Color Picker + Quick Toggle */}
+        <div className="flex items-center gap-1.5 min-w-0">
+          <StudioColorButton
+            value={activeChannelValue}
+            onChange={handleActiveColorChange}
+            fallbackHex={swatchTarget === 'textColor' ? '#18181B' : '#FAF8F5'}
+            label={activeChannelLabel}
+            allowTransparent={swatchTarget !== 'textColor'}
+            swatches={swatches}
+            onAddSwatch={onAddSelectedColorToSwatches}
+            fullWidth
+            className="flex-1 min-w-0"
+          />
+
+          {swatchTarget === 'bgColor' && (
+            <button
+              type="button"
+              onClick={() =>
+                updateSelected({
+                  bgColor: el.bgColor === 'transparent' ? '#FAF8F5' : 'transparent',
+                })
+              }
+              style={{
+                backgroundColor: 'var(--bg-input)',
+                borderColor: 'var(--border-strong)',
+                color: 'var(--accent)',
+              }}
+              className="h-8 px-2 rounded-md border text-[10px] font-mono font-semibold hover:border-[var(--accent)] transition shrink-0"
+              title="Toggle transparent background fill"
+            >
+              {el.bgColor === 'transparent' ? 'Solid' : 'Clear'}
+            </button>
+          )}
+
+          {swatchTarget === 'borderColor' && (
+            <button
+              type="button"
+              onClick={() =>
+                updateSelected(
+                  buildUniformBorderPatch(el, {
+                    borderWidth: displayBorderWidth > 0 && el.type !== 'pure_line' ? 0 : 1,
+                    borderColor:
+                      displayBorderColor === 'transparent' ? '#C86D51' : displayBorderColor,
+                  })
+                )
+              }
+              style={{
+                backgroundColor: 'var(--bg-input)',
+                borderColor: 'var(--border-strong)',
+                color: 'var(--accent)',
+              }}
+              className="h-8 px-2 rounded-md border text-[10px] font-mono font-semibold hover:border-[var(--accent)] transition shrink-0"
+              title={
+                el.type === 'pure_line'
+                  ? 'Reset line thickness to 1px'
+                  : displayBorderWidth > 0
+                    ? 'Remove border (0px)'
+                    : 'Add 1px border'
+              }
+            >
+              {el.type === 'pure_line' ? '1px' : displayBorderWidth > 0 ? '0px' : '1px'}
+            </button>
+          )}
+        </div>
+
+        {/* Quick Border Thickness & Style Controls */}
+        <div className="pt-2 border-t border-[var(--border-main)] space-y-1.5">
+          <div className="flex items-center justify-between gap-2 text-[10px]">
+            <span style={{ color: 'var(--text-muted)' }} className="font-medium">
+              {el.type === 'pure_line' ? 'Line Thickness & Style' : 'Border Thickness & Style'}
+            </span>
+            {hasCustomPerSideBorders && (
+              <span
+                style={{
+                  backgroundColor: 'var(--accent-soft)',
+                  color: 'var(--accent)',
+                }}
+                className="px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold"
+                title="Custom 4-side borders configured in Layout. Adjusting here syncs all 4 sides."
+              >
+                4-Side Custom
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-[1fr_54px_86px] gap-1.5 items-center">
+            <input
+              type="range"
+              min={el.type === 'pure_line' ? 1 : 0}
+              max={16}
+              value={Math.min(16, displayBorderWidth)}
+              onChange={(e) =>
+                updateSelected(
+                  buildUniformBorderPatch(el, {
+                    borderWidth: parseInt(e.target.value, 10) || 0,
+                  })
+                )
+              }
+              className="w-full accent-[var(--accent)] cursor-pointer min-w-0"
+              title={`Border Width: ${displayBorderWidth}px`}
+            />
+            <div className="relative flex items-center">
+              <input
+                type="number"
+                min={el.type === 'pure_line' ? 1 : 0}
+                max={24}
+                value={displayBorderWidth}
+                onChange={(e) =>
+                  updateSelected(
+                    buildUniformBorderPatch(el, {
+                      borderWidth: parseInt(e.target.value, 10) || 0,
+                    })
+                  )
+                }
+                style={{
+                  backgroundColor: 'var(--bg-input)',
+                  borderColor: 'var(--border-strong)',
+                }}
+                className="w-full border rounded-[5px] pl-1.5 pr-4 py-1 text-[10px] font-mono text-center"
+                title="Border Thickness (px)"
+              />
+              <span
+                style={{ color: 'var(--text-muted)' }}
+                className="absolute right-1 text-[8px] font-mono pointer-events-none"
+              >
+                px
+              </span>
+            </div>
+            <select
+              value={displayBorderStyle}
+              onChange={(e) =>
+                updateSelected(
+                  buildUniformBorderPatch(el, {
+                    borderStyle: e.target.value as BorderStyle,
+                  })
+                )
+              }
+              style={{
+                backgroundColor: 'var(--bg-input)',
+                borderColor: 'var(--border-strong)',
+              }}
+              className="w-full border rounded-[5px] px-1.5 py-1 text-[10px]"
+              title="Border Style"
+            >
+              {BORDER_STYLES.map((st) => (
+                <option key={st.value} value={st.value}>
+                  {st.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Integrated Character Swatches */}
+        <div className="pt-2 border-t border-[var(--border-main)] space-y-1.5">
+          <div className="flex items-center justify-between gap-2 text-[10px]">
+            <span style={{ color: 'var(--text-muted)' }}>
+              Swatches →{' '}
+              <strong style={{ color: 'var(--text-main)' }}>{activeChannelLabel}</strong>
+            </span>
+            <span style={{ color: 'var(--text-muted)' }} className="text-[9px] font-mono">
+              Click: apply · Right-click: remove
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {swatches.map((hex) => {
+              const isMatched =
+                activeChannelValue &&
+                activeChannelValue !== 'transparent' &&
+                hex.toUpperCase() === activeChannelValue.toUpperCase();
+              return (
+                <div key={hex} className="relative group">
+                  <button
+                    type="button"
+                    onClick={() => onApplySwatchColor(hex)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      onRemoveSwatch(hex);
+                    }}
+                    style={{
+                      backgroundColor: hex,
+                      borderColor: isMatched ? 'var(--accent)' : 'var(--border-strong)',
+                    }}
+                    className={`w-6 h-6 rounded-[5px] border hover:scale-110 transition block shadow-xs ${
+                      isMatched ? 'ring-2 ring-[var(--accent)] ring-offset-1 ring-offset-[var(--bg-panel-alt)]' : ''
+                    }`}
+                    title={`Click: Apply ${hex} to ${activeChannelLabel}\nRight-click: Remove swatch`}
+                  />
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemoveSwatch(hex);
+                    }}
+                    className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-rose-600 text-white rounded-full text-[9px] font-bold leading-none hidden group-hover:flex items-center justify-center shadow z-10 hover:bg-rose-700"
+                    title="Remove swatch"
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Surface Pattern */}
+        <label className="block pt-2 border-t border-[var(--border-main)]">
+          <span style={{ color: 'var(--text-muted)' }} className="block text-[10px] mb-1">
             Surface Pattern
           </span>
           <select
@@ -53,7 +383,7 @@ export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSection
               backgroundColor: 'var(--bg-input)',
               borderColor: 'var(--border-strong)',
             }}
-            className="w-full border rounded-[5px] px-1.5 py-1 text-[11px]"
+            className="w-full border rounded-[5px] px-2 py-1 text-[11px]"
           >
             <option value="none">Solid / Gradient</option>
             <option value="dots">Halftone Dots</option>
@@ -64,166 +394,6 @@ export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSection
             <option value="checker">Subtle Checker</option>
           </select>
         </label>
-
-        <div className="grid grid-cols-3 gap-2">
-          <label>
-            <div className="flex items-center justify-between mb-1">
-              <span style={{ color: 'var(--text-muted)' }} className="text-[10px]">
-                Fill
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  updateSelected({
-                    bgColor: el.bgColor === 'transparent' ? '#FAF8F5' : 'transparent',
-                    borderColor: el.bgColor === 'transparent' ? 'var(--border-strong)' : 'transparent',
-                    borderWidth: el.bgColor === 'transparent' ? 1 : 0,
-                    shadow: 'none',
-                  })
-                }
-                style={{ color: 'var(--accent)' }}
-                className="text-[9px] font-mono hover:underline"
-                title="Toggle transparent container mode"
-              >
-                {el.bgColor === 'transparent' ? 'Solid' : 'Clear'}
-              </button>
-            </div>
-            <div
-              style={{
-                backgroundColor: 'var(--bg-input)',
-                borderColor: 'var(--border-strong)',
-              }}
-              className="flex items-center gap-1 border rounded-[5px] px-1.5 py-1"
-            >
-              <input
-                type="color"
-                value={el.bgColor === 'transparent' ? '#F2EFE9' : el.bgColor}
-                onChange={(e) => updateSelected({ bgColor: e.target.value })}
-                className="w-4 h-4 cursor-pointer bg-transparent border-0 shrink-0"
-              />
-              <span className="font-mono text-[9px] truncate">
-                {el.bgColor === 'transparent' ? 'transparent' : el.bgColor}
-              </span>
-            </div>
-          </label>
-          <label>
-            <span style={{ color: 'var(--text-muted)' }} className="block mb-1 text-[10px]">
-              Text
-            </span>
-            <div
-              style={{
-                backgroundColor: 'var(--bg-input)',
-                borderColor: 'var(--border-strong)',
-              }}
-              className="flex items-center gap-1 border rounded-[5px] px-1.5 py-1"
-            >
-              <input
-                type="color"
-                value={el.textColor}
-                onChange={(e) => updateSelected({ textColor: e.target.value })}
-                className="w-4 h-4 cursor-pointer bg-transparent border-0 shrink-0"
-              />
-              <span className="font-mono text-[9px] truncate">{el.textColor}</span>
-            </div>
-          </label>
-          <label>
-            <span style={{ color: 'var(--text-muted)' }} className="block mb-1 text-[10px]">
-              Accent
-            </span>
-            <div
-              style={{
-                backgroundColor: 'var(--bg-input)',
-                borderColor: 'var(--border-strong)',
-              }}
-              className="flex items-center gap-1 border rounded-[5px] px-1.5 py-1"
-            >
-              <input
-                type="color"
-                value={el.borderColor === 'transparent' ? '#E5E5E5' : el.borderColor}
-                onChange={(e) => updateSelected({ borderColor: e.target.value })}
-                className="w-4 h-4 cursor-pointer bg-transparent border-0 shrink-0"
-              />
-              <span className="font-mono text-[9px] truncate">{el.borderColor}</span>
-            </div>
-          </label>
-        </div>
-      </div>
-
-      {/* Character Color Swatches */}
-      <div
-        style={{
-          backgroundColor: 'var(--bg-panel-alt)',
-          borderColor: 'var(--border-main)',
-        }}
-        className="p-2.5 rounded-[8px] border space-y-2"
-      >
-        <div className="flex items-center justify-between">
-          <span className="font-semibold text-[11px] flex items-center gap-1">
-            <Palette className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-            <span>Character Swatches</span>
-          </span>
-          <button
-            type="button"
-            onClick={onAddSelectedColorToSwatches}
-            style={{ color: 'var(--accent)' }}
-            className="text-[10px] font-mono hover:underline"
-          >
-            + Save Current
-          </button>
-        </div>
-
-        <div className="flex gap-1 text-[10px]">
-          {(
-            [
-              { key: 'bgColor', label: 'Fill' },
-              { key: 'borderColor', label: 'Border' },
-              { key: 'textColor', label: 'Text' },
-            ] as const
-          ).map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setSwatchTarget(t.key)}
-              style={
-                swatchTarget === t.key
-                  ? { backgroundColor: 'var(--accent)', color: '#fff' }
-                  : { backgroundColor: 'var(--bg-input)' }
-              }
-              className="flex-1 py-0.5 rounded-[4px] font-mono"
-            >
-              Apply to {t.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex flex-wrap gap-1.5 pt-0.5">
-          {swatches.map((hex) => (
-            <div key={hex} className="relative group">
-              <button
-                type="button"
-                onClick={() => onApplySwatchColor(hex)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  onRemoveSwatch(hex);
-                }}
-                style={{ backgroundColor: hex, borderColor: 'var(--border-strong)' }}
-                className="w-6 h-6 rounded-[4px] border hover:scale-110 transition block shadow-xs"
-                title={`Click: Apply ${hex} to ${swatchTarget}\nRight-click: Remove color`}
-              />
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemoveSwatch(hex);
-                }}
-                className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-rose-600 text-white rounded-full text-[9px] font-bold leading-none hidden group-hover:flex items-center justify-center shadow z-10 hover:bg-rose-700"
-                title="Remove color"
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
       </div>
 
       {/* Gradient & Inline Container BG Image */}
@@ -231,6 +401,7 @@ export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSection
         el={el}
         updateSelected={updateSelected}
         isToyhouseFree={isToyhouseFree}
+        swatches={swatches}
       />
 
       {/* Quick Surface Recipes (Pure & Normal) */}
@@ -242,4 +413,3 @@ export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSection
     </div>
   );
 };
-

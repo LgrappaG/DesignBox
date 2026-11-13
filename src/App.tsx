@@ -42,6 +42,7 @@ import {
   TargetPlatform,
 } from './types/schema';
 import { getInnerBoxGeometry } from './utils/canvasGeometry';
+import { buildUniformBorderPatch, getDisplayBorderColor } from './utils/borderHelpers';
 import {
   buildBlueprintInstanceElement,
   buildDefaultElement,
@@ -189,6 +190,52 @@ export default function App() {
   const [bottomDockHeight, setBottomDockHeight] = useState<number>(
     typeof initialLayoutPrefs.bottomDockHeight === 'number' ? initialLayoutPrefs.bottomDockHeight : 230
   );
+
+  const [windowSize, setWindowSize] = useState<{ w: number; h: number }>(() => ({
+    w: typeof window !== 'undefined' ? window.innerWidth : 1380,
+    h: typeof window !== 'undefined' ? window.innerHeight : 860,
+  }));
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleWindowResize = () => {
+      setWindowSize({ w: window.innerWidth, h: window.innerHeight });
+    };
+    window.addEventListener('resize', handleWindowResize);
+    return () => window.removeEventListener('resize', handleWindowResize);
+  }, []);
+
+  const { effectiveLeftWidth, effectiveRightWidth, effectiveBottomDockHeight } = useMemo(() => {
+    const leftReserved = leftCollapsed ? 32 : 0;
+    const rightReserved = rightCollapsed ? 32 : 0;
+    const minCenterWidth = windowSize.w < 960 ? 280 : 340;
+    const availableForSidebars = Math.max(0, windowSize.w - leftReserved - rightReserved - minCenterWidth);
+
+    let nextLeft = leftCollapsed ? 32 : leftPanelWidth;
+    let nextRight = rightCollapsed ? 32 : rightPanelWidth;
+
+    if (!leftCollapsed && !rightCollapsed && nextLeft + nextRight > availableForSidebars) {
+      const scale = availableForSidebars / Math.max(1, nextLeft + nextRight);
+      nextLeft = Math.max(190, Math.floor(nextLeft * scale));
+      nextRight = Math.max(220, Math.floor(nextRight * scale));
+      if (nextLeft + nextRight > availableForSidebars && availableForSidebars > 0) {
+        nextLeft = Math.floor(availableForSidebars * 0.45);
+        nextRight = Math.max(0, availableForSidebars - nextLeft);
+      }
+    } else if (!leftCollapsed && rightCollapsed) {
+      nextLeft = Math.min(nextLeft, Math.max(190, availableForSidebars));
+    } else if (!rightCollapsed && leftCollapsed) {
+      nextRight = Math.min(nextRight, Math.max(220, availableForSidebars));
+    }
+
+    const maxDockH = Math.max(130, Math.min(520, windowSize.h - 240));
+    const nextDockH = Math.min(bottomDockHeight, maxDockH);
+    return {
+      effectiveLeftWidth: nextLeft,
+      effectiveRightWidth: nextRight,
+      effectiveBottomDockHeight: nextDockH,
+    };
+  }, [windowSize, leftCollapsed, rightCollapsed, leftPanelWidth, rightPanelWidth, bottomDockHeight]);
 
   // Modals & Image Upload State
   const [showLivePreviewModal, setShowLivePreviewModal] = useState<boolean>(false);
@@ -1456,13 +1503,24 @@ export default function App() {
 
   const applySwatchColor = (hex: string) => {
     if (!selectedElement) return;
+    if (swatchTarget === 'borderColor') {
+      updateSelected(buildUniformBorderPatch(selectedElement, { borderColor: hex }));
+      return;
+    }
     updateSelected({ [swatchTarget]: hex });
   };
 
   const addSelectedColorToSwatches = () => {
     if (!selectedElement) return;
-    const hex = selectedElement[swatchTarget];
-    if (hex && hex !== 'transparent' && !swatches.includes(hex)) {
+    const hex =
+      swatchTarget === 'borderColor'
+        ? getDisplayBorderColor(selectedElement)
+        : selectedElement[swatchTarget];
+    if (
+      hex &&
+      hex !== 'transparent' &&
+      !swatches.some((s) => s.toUpperCase() === hex.toUpperCase())
+    ) {
       setSwatches((prev) => [...prev, hex]);
     }
   };
@@ -1717,10 +1775,10 @@ export default function App() {
         onCopyCode={handleCopyCode}
       />
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden min-w-0 min-h-0">
         <LeftSidebar
           leftCollapsed={leftCollapsed}
-          leftPanelWidth={leftPanelWidth}
+          leftPanelWidth={effectiveLeftWidth}
           leftLibraryPct={leftLibraryPct}
           leftSidebarTab={leftSidebarTab}
           leftSplitContainerRef={leftSplitContainerRef}
@@ -1731,6 +1789,7 @@ export default function App() {
           selectedIds={selectedIds}
           isToyhouseFree={isToyhouseFreePlatform(platform)}
           canvasBg={canvasBg}
+          swatches={swatches}
           editingLayerId={editingLayerId}
           customBlueprints={customBlueprints}
           onExpandLeft={() => setLeftCollapsed(false)}
@@ -1824,12 +1883,13 @@ export default function App() {
           activeCanvasTabs={activeCanvasTabs}
           bottomDockOpen={bottomDockOpen}
           bottomDockTab={bottomDockTab}
-          bottomDockHeight={bottomDockHeight}
+          bottomDockHeight={effectiveBottomDockHeight}
           previewSrcDoc={previewSrcDoc}
           previewSurface={previewSurface}
           previewViewport={previewViewport}
           rightCollapsed={rightCollapsed}
           copied={copied}
+          swatches={swatches}
           canvasRef={canvasRef}
           canvasViewportRef={canvasViewportRef}
           canvasTransformRef={canvasTransformRef}
@@ -1904,7 +1964,7 @@ export default function App() {
 
         <RightInspector
           rightCollapsed={rightCollapsed}
-          rightPanelWidth={rightPanelWidth}
+          rightPanelWidth={effectiveRightWidth}
           panelResizeDrag={panelResizeDrag}
           inspectorTab={inspectorTab}
           elements={elements}

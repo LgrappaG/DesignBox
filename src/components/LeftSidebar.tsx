@@ -67,6 +67,7 @@ import {
   GlobalThemePalette,
 } from '../types/schema';
 import { FaIconBrowser } from './shared/FaIconBrowser';
+import { StudioColorButton } from './shared/StudioColorPicker';
 
 export type LeftSidebarTab = 'pure' | 'blocks' | 'assets' | 'theme';
 
@@ -83,6 +84,7 @@ export interface LeftSidebarProps {
   selectedIds: string[];
   isToyhouseFree: boolean;
   canvasBg: string;
+  swatches?: string[];
   editingLayerId: string | null;
   customBlueprints: CustomWidgetBlueprint[];
   onExpandLeft: () => void;
@@ -226,6 +228,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   selectedIds,
   isToyhouseFree,
   canvasBg,
+  swatches,
   editingLayerId,
   customBlueprints,
   onExpandLeft,
@@ -307,7 +310,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 color: leftSidebarTab === 'pure' ? 'var(--accent)' : 'var(--text-muted)',
                 backgroundColor: leftSidebarTab === 'pure' ? 'var(--bg-panel)' : 'transparent',
               }}
-              className="flex items-center justify-center gap-1 px-1 py-2 text-[10.5px] font-bold border-b-2 transition"
+              className="flex items-center justify-center gap-1 px-1 py-2 min-w-0 text-[10.5px] font-bold border-b-2 transition"
               title="Pure Blank Primitives (27)"
             >
               <Square className="w-3 h-3 shrink-0" />
@@ -321,7 +324,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 color: leftSidebarTab === 'blocks' ? 'var(--accent)' : 'var(--text-muted)',
                 backgroundColor: leftSidebarTab === 'blocks' ? 'var(--bg-panel)' : 'transparent',
               }}
-              className="flex items-center justify-center gap-1 px-1 py-2 text-[10.5px] font-bold border-b-2 transition"
+              className="flex items-center justify-center gap-1 px-1 py-2 min-w-0 text-[10.5px] font-bold border-b-2 transition"
               title="Core Toyhouse Widgets & Blueprints"
             >
               <LayoutGrid className="w-3 h-3 shrink-0" />
@@ -335,7 +338,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 color: leftSidebarTab === 'assets' ? 'var(--accent)' : 'var(--text-muted)',
                 backgroundColor: leftSidebarTab === 'assets' ? 'var(--bg-panel)' : 'transparent',
               }}
-              className="flex items-center justify-center gap-1 px-1 py-2 text-[10.5px] font-bold border-b-2 transition"
+              className="flex items-center justify-center gap-1 px-1 py-2 min-w-0 text-[10.5px] font-bold border-b-2 transition"
               title="Curated Stamps, Washi, Stickers & FontAwesome 6 Icon Browser"
             >
               <Sparkles className="w-3 h-3 shrink-0" />
@@ -349,7 +352,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 color: leftSidebarTab === 'theme' ? 'var(--accent)' : 'var(--text-muted)',
                 backgroundColor: leftSidebarTab === 'theme' ? 'var(--bg-panel)' : 'transparent',
               }}
-              className="flex items-center justify-center gap-1 px-1 py-2 text-[10.5px] font-bold border-b-2 transition"
+              className="flex items-center justify-center gap-1 px-1 py-2 min-w-0 text-[10.5px] font-bold border-b-2 transition"
               title="Global Theme Palettes & Batch Typography"
             >
               <Palette className="w-3 h-3 shrink-0" />
@@ -553,14 +556,14 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                           onClick={() => onAddElement(item.type)}
                           title={item.desc}
                           style={{
-                            backgroundColor: '#FFFFFF',
-                            color: '#1F2937',
+                            backgroundColor: 'var(--bg-panel-alt)',
+                            color: 'var(--text-main)',
                             borderColor: 'var(--border-strong)',
                           }}
-                          className="flex items-center gap-1.5 px-2 py-1.5 rounded-[6px] border text-[11px] font-medium hover:ring-1 hover:ring-amber-600 transition text-left shadow-sm"
+                          className="flex items-center gap-1.5 px-2 py-1.5 rounded-[6px] border text-[11px] font-medium hover:border-[var(--accent)] transition text-left shadow-sm min-w-0"
                         >
-                          <IconComp className="w-3 h-3 shrink-0 text-stone-500" />
-                          <span className="truncate flex-1">{item.label}</span>
+                          <IconComp className="w-3 h-3 shrink-0" style={{ color: 'var(--accent)' }} />
+                          <span className="truncate min-w-0 flex-1">{item.label}</span>
                           {!item.f2uSafe && (
                             <span className="text-[8px] font-mono px-1 rounded bg-amber-500/15 text-amber-600 shrink-0">
                               PRO
@@ -778,7 +781,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                   <span className="text-[8.5px] font-mono text-emerald-500">F2U SAFE</span>
                 </div>
 
-                <div className="grid grid-cols-3 gap-1.5 text-[9.5px]">
+                <div className="grid grid-cols-2 gap-1.5 text-[9.5px]">
                   {(
                     [
                       { key: 'canvasBg', label: 'Canvas' },
@@ -789,25 +792,25 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                       { key: 'textColor', label: 'Text' },
                     ] as const
                   ).map((role) => (
-                    <label
+                    <StudioColorButton
                       key={role.key}
-                      style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                      className="flex items-center gap-1 border rounded px-1.5 py-1 cursor-pointer"
-                    >
-                      <input
-                        type="color"
-                        value={draftTheme[role.key]}
-                        onChange={(e) =>
-                          setDraftTheme((prev) => ({
-                            ...prev,
-                            id: 'custom',
-                            [role.key]: e.target.value,
-                          }))
-                        }
-                        className="w-4 h-4 p-0 border-0 bg-transparent cursor-pointer shrink-0"
-                      />
-                      <span className="truncate font-mono">{role.label}</span>
-                    </label>
+                      value={draftTheme[role.key]}
+                      onChange={(nextColor) =>
+                        setDraftTheme((prev) => ({
+                          ...prev,
+                          id: 'custom',
+                          [role.key]: nextColor,
+                        }))
+                      }
+                      fallbackHex="#FAF8F5"
+                      label={role.label}
+                      allowAlpha={false}
+                      allowTransparent={false}
+                      swatches={swatches}
+                      fullWidth
+                      title={`${role.label} Theme Color`}
+                      className="h-7 px-1.5"
+                    />
                   ))}
                 </div>
 
@@ -1026,7 +1029,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                             }
                           }}
                           onClick={(e) => e.stopPropagation()}
-                          className="w-full bg-white dark:bg-stone-800 text-xs px-1 py-0.5 rounded border border-accent font-medium outline-none"
+                          style={{ backgroundColor: 'var(--bg-input)', color: 'var(--text-main)' }}
+                          className="w-full text-xs px-1 py-0.5 rounded border border-accent font-medium outline-none"
                         />
                       ) : (
                         <span
