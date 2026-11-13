@@ -16,7 +16,7 @@ test('F2U Shield detects Pro settings and masks without mutating user element', 
     glassBlur: 12,
     rotation: -15,
     imgRotation: 22,
-    boxClipShape: 'octagon',
+    boxClipShape: 'ticket',
     hoverEffect: 'glow',
     idleAnimation: 'float',
     googleFont: 'Cinzel',
@@ -54,7 +54,7 @@ test('F2U Shield detects Pro settings and masks without mutating user element', 
   // Original element MUST stay completely unmutated so returning to Pro restores everything
   assert.equal(proRichBox.glassBlur, 12);
   assert.equal(proRichBox.rotation, -15);
-  assert.equal(proRichBox.boxClipShape, 'octagon');
+  assert.equal(proRichBox.boxClipShape, 'ticket');
   assert.equal(proRichBox.hoverEffect, 'glow');
   assert.equal(proRichBox.idleAnimation, 'float');
   assert.equal(proRichBox.googleFont, 'Cinzel');
@@ -65,6 +65,11 @@ test('F2U Shield keeps F2U-safe shapes, 90-degree rotations, and native FA anima
   assert.equal(isF2USafeShape('arch'), true);
   assert.equal(isF2USafeShape('pill'), true);
   assert.equal(isF2USafeShape('leaf'), true);
+  assert.equal(isF2USafeShape('hexagon'), true);
+  assert.equal(isF2USafeShape('hexagon_flat'), true);
+  assert.equal(isF2USafeShape('diamond'), true);
+  assert.equal(isF2USafeShape('octagon'), true);
+  assert.equal(isF2USafeShape('bevel'), true);
   assert.equal(isF2USafeShape('ticket'), false);
   assert.equal(isF2USafeShape('cross_star'), false);
 

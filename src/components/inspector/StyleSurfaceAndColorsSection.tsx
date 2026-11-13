@@ -409,6 +409,7 @@ export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSection
         el={el}
         updateSelected={updateSelected}
         isToyhouseFree={isToyhouseFree}
+        swatches={swatches}
       />
     </div>
   );

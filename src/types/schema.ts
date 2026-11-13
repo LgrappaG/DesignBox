@@ -63,6 +63,8 @@ export type ElementType =
   | 'pure_circle'
   | 'pure_pill'
   | 'pure_diamond'
+  | 'pure_hexagon'
+  | 'pure_octagon'
   | 'pure_banner'
   | 'pure_image_slot'
   | 'pure_overlay_box'
@@ -101,6 +103,7 @@ export type ImageShape =
   | 'polaroid'
   | 'diamond'
   | 'hexagon'
+  | 'hexagon_flat'
   | 'octagon'
   | 'bevel'
   | 'ticket'
@@ -311,6 +314,8 @@ export interface DesignElement {
   idleAnimation?: IdleAnimation;
   imageShape?: ImageShape;
   boxClipShape?: ImageShape;
+  shapeCutPx?: number;
+  shapeMaskBgColor?: string;
   objectFit?: 'cover' | 'contain';
   watermarkAnchor?: 'center' | 'top_left' | 'top_right' | 'bottom_left' | 'bottom_right';
   watermarkOffsetX?: number;

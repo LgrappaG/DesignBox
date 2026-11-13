@@ -1092,21 +1092,33 @@ export default function App() {
     const [base, cutter] = sorted;
     const xPct = Math.max(0, Math.min(100, Math.round(((cutter.x + cutter.width / 2 - base.x) / Math.max(1, base.width)) * 100)));
     const yPct = Math.max(0, Math.min(100, Math.round(((cutter.y + cutter.height / 2 - base.y) / Math.max(1, base.height)) * 100)));
+    const cutterShape = cutter.boxClipShape || cutter.imageShape;
     const usesBooleanMask =
       cutter.type === 'pure_diamond' ||
+      cutter.type === 'pure_hexagon' ||
+      cutter.type === 'pure_octagon' ||
       cutter.type === 'pure_star' ||
+      cutterShape === 'diamond' ||
+      cutterShape === 'hexagon' ||
+      cutterShape === 'octagon' ||
       Boolean(cutter.rotation && Math.round(cutter.rotation) % 90 !== 0);
+
+    const resolvedMaskShape =
+      cutter.type === 'pure_hexagon' || cutterShape === 'hexagon' || cutterShape === 'hexagon_flat'
+        ? ('hexagon' as const)
+        : cutter.type === 'pure_octagon' || cutterShape === 'octagon'
+        ? ('octagon' as const)
+        : cutter.type === 'pure_diamond' || cutterShape === 'diamond'
+        ? ('diamond' as const)
+        : cutter.type === 'pure_star'
+        ? ('star' as const)
+        : ('rect' as const);
 
     const newMod = usesBooleanMask
       ? {
           ...createDefaultModifier('boolean_mask', base),
           operation: 'subtract' as const,
-          maskShape:
-            cutter.type === 'pure_diamond'
-              ? ('diamond' as const)
-              : cutter.type === 'pure_star'
-              ? ('star' as const)
-              : ('rect' as const),
+          maskShape: resolvedMaskShape,
           xPct,
           yPct,
           widthPx: Math.max(12, cutter.width),

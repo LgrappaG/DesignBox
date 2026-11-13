@@ -8,6 +8,12 @@ import { PURE_SURFACE_RECIPES } from '../data/purePrimitives';
 import { FaIconBrowser } from './shared/FaIconBrowser';
 import { StudioColorButton } from './shared/StudioColorPicker';
 import {
+  DEFAULT_SHAPE_CUT_PX,
+  isF2UGeometricShape,
+  MAX_SHAPE_CUT_PX,
+  MIN_SHAPE_CUT_PX,
+} from '../utils/f2uShapeCss';
+import {
   buildUniformBorderPatch,
   getDisplayBorderColor,
   getDisplayBorderStyle,
@@ -37,13 +43,15 @@ const BOX_SHAPE_OPTIONS: ReadonlyArray<{ id: ImageShape; label: string; f2u: boo
   { id: 'pill', label: 'Pill', f2u: true },
   { id: 'arch', label: 'Arch', f2u: true },
   { id: 'leaf', label: 'Leaf', f2u: true },
-  { id: 'bevel', label: 'Bevel', f2u: false },
-  { id: 'octagon', label: 'Octagon', f2u: false },
+  { id: 'hexagon', label: 'Hexagon', f2u: true },
+  { id: 'hexagon_flat', label: 'Hex Flat', f2u: true },
+  { id: 'diamond', label: 'Diamond', f2u: true },
+  { id: 'octagon', label: 'Octagon', f2u: true },
+  { id: 'bevel', label: 'Bevel', f2u: true },
   { id: 'ticket', label: 'Ticket', f2u: false },
   { id: 'shield', label: 'Shield', f2u: false },
   { id: 'cross_star', label: 'Sparkle', f2u: false },
   { id: 'scallop', label: 'Scallop', f2u: false },
-  { id: 'diamond', label: 'Diamond', f2u: false },
   { id: 'star', label: 'Star', f2u: false },
   { id: 'heart', label: 'Heart', f2u: false },
 ];
@@ -64,9 +72,23 @@ export const PureSurfaceSculptorSection: React.FC<PureInspectorProps> = ({
   el,
   updateSelected,
   isToyhouseFree,
+  swatches = [],
 }) => {
   const isImg = el.type === 'image' || el.type === 'pure_image_slot';
-  const activeBoxShape: ImageShape = el.boxClipShape || 'rect';
+  const activeBoxShape: ImageShape =
+    el.boxClipShape ||
+    (el.type === 'pure_diamond'
+      ? 'diamond'
+      : el.type === 'pure_hexagon'
+      ? 'hexagon'
+      : el.type === 'pure_octagon'
+      ? 'octagon'
+      : 'rect');
+  const isGeoBox = isF2UGeometricShape(activeBoxShape);
+  const hasCustomSurface =
+    Boolean(el.bgImageUrl && el.bgImageUrl.trim()) ||
+    Boolean(el.bgGradientTo && el.bgGradientTo !== '' && el.bgGradientTo !== el.bgColor) ||
+    (Boolean(el.bgPattern) && el.bgPattern !== 'none');
 
   return (
     <div
@@ -126,7 +148,9 @@ export const PureSurfaceSculptorSection: React.FC<PureInspectorProps> = ({
                 className="border rounded-[4px] py-0.5 px-1 text-[9px] font-mono truncate flex items-center justify-center gap-0.5"
                 title={
                   shp.f2u
-                    ? '100% Toyhouse F2U Safe (pure border-radius)'
+                    ? isF2UGeometricShape(shp.id)
+                      ? '100% Toyhouse F2U Safe (4-quadrant inline CSS gradient geometry)'
+                      : '100% Toyhouse F2U Safe (pure border-radius)'
                     : 'Pro clip-path shape (masked on F2U, preserved for Premium/Carrd)'
                 }
               >
@@ -135,6 +159,91 @@ export const PureSurfaceSculptorSection: React.FC<PureInspectorProps> = ({
               </button>
             ))}
           </div>
+
+          {isGeoBox && (
+            <div
+              style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}
+              className="mt-1.5 p-2 rounded-[6px] border space-y-2 text-[10px]"
+            >
+              {(activeBoxShape === 'hexagon' || activeBoxShape === 'hexagon_flat') && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold opacity-80">Hexagon Orientation</span>
+                  <div className="grid grid-cols-2 gap-1">
+                    {(
+                      [
+                        { id: 'hexagon', label: 'Pointy ⬡' },
+                        { id: 'hexagon_flat', label: 'Flat ⬢' },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => updateSelected({ boxClipShape: opt.id })}
+                        style={
+                          activeBoxShape === opt.id
+                            ? { backgroundColor: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' }
+                            : { backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-strong)' }
+                        }
+                        className="border rounded-[4px] px-2 py-0.5 text-[9.5px] font-medium transition"
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(activeBoxShape === 'bevel' || activeBoxShape === 'octagon') && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-semibold opacity-80">
+                      {activeBoxShape === 'bevel' ? 'Bevel Cut Size' : 'Corner Cut (px)'}
+                    </span>
+                    <div className="flex items-center gap-1.5 font-mono text-[9.5px]">
+                      <span>
+                        {activeBoxShape === 'octagon' && !el.shapeCutPx
+                          ? 'Auto (29%)'
+                          : `${el.shapeCutPx ?? DEFAULT_SHAPE_CUT_PX}px`}
+                      </span>
+                      {activeBoxShape === 'octagon' && el.shapeCutPx !== undefined && (
+                        <button
+                          type="button"
+                          onClick={() => updateSelected({ shapeCutPx: undefined })}
+                          style={{ color: 'var(--accent)' }}
+                          className="text-[9px] hover:underline"
+                        >
+                          Auto
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <input
+                    type="range"
+                    min={MIN_SHAPE_CUT_PX}
+                    max={MAX_SHAPE_CUT_PX}
+                    value={el.shapeCutPx ?? (activeBoxShape === 'bevel' ? DEFAULT_SHAPE_CUT_PX : 20)}
+                    onChange={(e) => updateSelected({ shapeCutPx: Number(e.target.value) })}
+                    className="w-full"
+                  />
+                </div>
+              )}
+
+              {isToyhouseFree && (hasCustomSurface || el.bgColor === 'transparent') && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold opacity-80">Corner Mask Color</span>
+                  <div className="w-28">
+                    <StudioColorButton
+                      value={el.shapeMaskBgColor || '#FAF8F5'}
+                      onChange={(c) => updateSelected({ shapeMaskBgColor: c })}
+                      swatches={swatches}
+                      allowTransparent={false}
+                      label="Match bg behind shape corners"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -17,6 +17,12 @@ import {
 import { FaIconBrowser } from '../shared/FaIconBrowser';
 import { StudioColorButton } from '../shared/StudioColorPicker';
 import {
+  DEFAULT_SHAPE_CUT_PX,
+  isF2UGeometricShape,
+  MAX_SHAPE_CUT_PX,
+  MIN_SHAPE_CUT_PX,
+} from '../../utils/f2uShapeCss';
+import {
   CustomPropDefinition,
   DesignElement,
   GalleryItem,
@@ -848,14 +854,15 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
                 <option value="pill">Capsule Pill [F2U]</option>
                 <option value="arch">Gothic Arch [F2U]</option>
                 <option value="leaf">Botanical Leaf [F2U]</option>
-                <option value="bevel">Chamfer Bevel [PRO]</option>
-                <option value="octagon">Octagon Cut [PRO]</option>
-                <option value="hexagon">Hexagon Crest [PRO]</option>
+                <option value="hexagon">Hexagon (Pointy) [F2U]</option>
+                <option value="hexagon_flat">Hexagon (Flat) [F2U]</option>
+                <option value="diamond">Diamond Cut [F2U]</option>
+                <option value="octagon">Octagon Cut [F2U]</option>
+                <option value="bevel">Chamfer Bevel [F2U]</option>
                 <option value="ticket">Ticket Notches [PRO]</option>
                 <option value="shield">Heraldic Shield [PRO]</option>
                 <option value="cross_star">4-Pt Sparkle [PRO]</option>
                 <option value="scallop">Scallop Flower [PRO]</option>
-                <option value="diamond">Diamond Cut [PRO]</option>
                 <option value="star">5-Point Star [PRO]</option>
                 <option value="heart">Heart Mask [PRO]</option>
               </select>
@@ -873,6 +880,100 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
               </select>
             </label>
           </div>
+
+          {isF2UGeometricShape(el.imageShape) && (
+            <div
+              style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-main)' }}
+              className="p-2 rounded-[6px] border space-y-2 text-[10px]"
+            >
+              {(el.imageShape === 'hexagon' || el.imageShape === 'hexagon_flat') && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold opacity-80">Hexagon Orientation</span>
+                  <div className="grid grid-cols-2 gap-1">
+                    {(
+                      [
+                        { id: 'hexagon', label: 'Pointy ⬡' },
+                        { id: 'hexagon_flat', label: 'Flat ⬢' },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => updateSelected({ imageShape: opt.id })}
+                        style={
+                          el.imageShape === opt.id
+                            ? { backgroundColor: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' }
+                            : { backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }
+                        }
+                        className="border rounded-[4px] px-2 py-0.5 text-[9.5px] font-medium transition"
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(el.imageShape === 'bevel' || el.imageShape === 'octagon') && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-semibold opacity-80">
+                      {el.imageShape === 'bevel' ? 'Bevel Cut Size' : 'Corner Cut (px)'}
+                    </span>
+                    <div className="flex items-center gap-1.5 font-mono text-[9.5px]">
+                      <span>
+                        {el.imageShape === 'octagon' && !el.shapeCutPx
+                          ? 'Auto (29%)'
+                          : `${el.shapeCutPx ?? DEFAULT_SHAPE_CUT_PX}px`}
+                      </span>
+                      {el.imageShape === 'octagon' && el.shapeCutPx !== undefined && (
+                        <button
+                          type="button"
+                          onClick={() => updateSelected({ shapeCutPx: undefined })}
+                          style={{ color: 'var(--accent)' }}
+                          className="text-[9px] hover:underline"
+                        >
+                          Auto
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <input
+                    type="range"
+                    min={MIN_SHAPE_CUT_PX}
+                    max={MAX_SHAPE_CUT_PX}
+                    value={el.shapeCutPx ?? (el.imageShape === 'bevel' ? DEFAULT_SHAPE_CUT_PX : 20)}
+                    onChange={(e) => updateSelected({ shapeCutPx: Number(e.target.value) })}
+                    className="w-full"
+                  />
+                </div>
+              )}
+
+              {isToyhouseFree && (
+                (el.borderWidth || 0) > 0 &&
+                el.borderColor !== 'transparent' &&
+                (!el.frameStyle || el.frameStyle === 'none') &&
+                Boolean(el.url?.trim() || el.type === 'image') ? (
+                  <p className="text-[9.5px] opacity-75 leading-snug">
+                    F2U uses your Border Color as the polygon frame outline. Set Border Width to 0 to match surrounding background color.
+                  </p>
+                ) : (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold opacity-80">Corner Mask Color</span>
+                    <div className="w-28">
+                      <StudioColorButton
+                        value={el.shapeMaskBgColor || '#FAF8F5'}
+                        onChange={(c) => updateSelected({ shapeMaskBgColor: c })}
+                        swatches={swatches}
+                        allowTransparent={false}
+                        label="Match canvas or card bg behind image corners"
+                      />
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
+          )}
 
           <div className="pt-2 border-t border-black/10 space-y-1.5">
             <div className="flex items-center justify-between">

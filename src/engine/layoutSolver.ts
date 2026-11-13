@@ -18,6 +18,12 @@ import {
   renderSplitModifierHTML,
 } from './modifierRenderer';
 import { isF2USafeShape, maskElementForF2USimulation } from './f2uShield';
+import {
+  buildF2UCornerMaskOverlayCss,
+  buildF2UQuadrantSurfaceCss,
+  isF2UGeometricShape,
+  normalizeShapeCutPx,
+} from '../utils/f2uShapeCss';
 
 export interface SolvedRow {
   rowIndex: number;
@@ -106,18 +112,27 @@ export function getShapeBorderRadiusOverride(shape?: ImageShape): string {
   }
 }
 
-export function getImageClipPath(shape?: ImageShape): string {
+export function getImageClipPath(shape?: ImageShape, shapeCutPx?: number): string {
   switch (shape) {
     case 'circle':
       return 'circle(50% at 50% 50%)';
     case 'diamond':
       return 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)';
     case 'hexagon':
+      return 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)';
+    case 'hexagon_flat':
       return 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)';
-    case 'octagon':
+    case 'octagon': {
+      if (typeof shapeCutPx === 'number' && !Number.isNaN(shapeCutPx) && shapeCutPx > 0) {
+        const px = normalizeShapeCutPx(shapeCutPx);
+        return `polygon(${px}px 0, calc(100% - ${px}px) 0, 100% ${px}px, 100% calc(100% - ${px}px), calc(100% - ${px}px) 100%, ${px}px 100%, 0 calc(100% - ${px}px), 0 ${px}px)`;
+      }
       return 'polygon(29% 0%, 71% 0%, 100% 29%, 100% 71%, 71% 100%, 29% 100%, 0% 71%, 0% 29%)';
-    case 'bevel':
-      return 'polygon(14px 0, calc(100% - 14px) 0, 100% 14px, 100% calc(100% - 14px), calc(100% - 14px) 100%, 14px 100%, 0 calc(100% - 14px), 0 14px)';
+    }
+    case 'bevel': {
+      const px = normalizeShapeCutPx(shapeCutPx);
+      return `polygon(${px}px 0, calc(100% - ${px}px) 0, 100% ${px}px, 100% calc(100% - ${px}px), calc(100% - ${px}px) 100%, ${px}px 100%, 0 calc(100% - ${px}px), 0 ${px}px)`;
+    }
     case 'ticket':
       return 'polygon(0 0, 100% 0, 100% 34%, calc(100% - 12px) 50%, 100% 66%, 100% 100%, 0 100%, 0 66%, 12px 50%, 0 34%)';
     case 'shield':
@@ -710,23 +725,153 @@ export function renderInnerElementHTML(
     ? { maskCss: '', maskRingOverlaysHtml: '' }
     : buildSvgMaskStyle(el);
   const { f2uPunchHtml, overlaysHtml } = renderOverlayModifiersHTML(el);
+
+  const isImgSlotEmpty = el.type === 'pure_image_slot' && (!el.url || !el.url.trim());
+  const isImageWithUrl = el.type === 'image' || (el.type === 'pure_image_slot' && !isImgSlotEmpty);
+  const isNonGeoPrimitive =
+    el.type === 'pure_line' ||
+    el.type === 'lace_divider' ||
+    el.type === 'folder_header' ||
+    el.type === 'washi_tape' ||
+    el.type === 'pure_star';
+  const effectiveBoxShape: ImageShape | undefined = isImageWithUrl
+    ? undefined
+    : isImgSlotEmpty
+    ? el.imageShape && el.imageShape !== 'rect'
+      ? el.imageShape
+      : el.boxClipShape
+    : el.boxClipShape ||
+      (el.type === 'pure_diamond'
+        ? 'diamond'
+        : el.type === 'pure_hexagon'
+        ? 'hexagon'
+        : el.type === 'pure_octagon'
+        ? 'octagon'
+        : undefined);
+
+  const hasCustomBgSurface =
+    Boolean(el.bgImageUrl && el.bgImageUrl.trim()) ||
+    Boolean(el.bgGradientTo && el.bgGradientTo !== '' && el.bgGradientTo !== el.bgColor) ||
+    (Boolean(el.bgPattern) && el.bgPattern !== 'none');
+  const hasUniformBorder =
+    el.bordersLinked !== false &&
+    (el.borderWidth || 0) > 0 &&
+    Boolean(el.borderColor && el.borderColor !== 'transparent');
+  const isLinkElement = el.type === 'button' || el.type === 'pure_link';
+
+  const isBoxF2UGeo =
+    !isImageWithUrl &&
+    !isNonGeoPrimitive &&
+    isF2UGeometricShape(effectiveBoxShape) &&
+    !usesF2UPunch;
+
+  const geoUseQuadrantFill = isBoxF2UGeo && !hasCustomBgSurface;
+  const geoBorderShell =
+    isBoxF2UGeo &&
+    hasUniformBorder &&
+    !isLinkElement &&
+    (!hasCustomBgSurface || isToyhouseFree);
+  const geoCornerOverlayHtml =
+    isBoxF2UGeo && hasCustomBgSurface && isToyhouseFree
+      ? `<div style="position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 5; ${buildF2UCornerMaskOverlayCss(
+          effectiveBoxShape!,
+          geoBorderShell ? el.borderColor : el.shapeMaskBgColor || '#FAF8F5',
+          el.shapeCutPx
+        )}"></div>`
+      : '';
+
+  const activeImageShape = isImageWithUrl ? el.imageShape || el.boxClipShape : undefined;
+  const isStandardImgFrame = !el.frameStyle || el.frameStyle === 'none';
+  const hasImgGeoBorder =
+    isImageWithUrl &&
+    isToyhouseFree &&
+    isStandardImgFrame &&
+    isF2UGeometricShape(activeImageShape) &&
+    hasUniformBorder;
+  const isF2UGeoImage =
+    isImageWithUrl && isToyhouseFree && isF2UGeometricShape(activeImageShape);
+
   const effectiveBoxRadius =
-    el.type !== 'image' && el.type !== 'pure_image_slot'
-      ? getShapeBorderRadiusOverride(el.boxClipShape) || getBorderRadiusCSS(el)
+    (isBoxF2UGeo && (geoUseQuadrantFill || isToyhouseFree)) || (isF2UGeoImage && isStandardImgFrame)
+      ? '0'
+      : el.type !== 'image' && el.type !== 'pure_image_slot'
+      ? getShapeBorderRadiusOverride(effectiveBoxShape || el.boxClipShape) || getBorderRadiusCSS(el)
       : getBorderRadiusCSS(el);
   const boxClipExpr =
-    !isToyhouseFree && el.type !== 'image' && el.type !== 'pure_image_slot'
-      ? getImageClipPath(el.boxClipShape)
+    !isToyhouseFree && !isImageWithUrl && (!isBoxF2UGeo || hasCustomBgSurface)
+      ? getImageClipPath(effectiveBoxShape || el.boxClipShape, el.shapeCutPx)
       : 'none';
   const boxClipCss = boxClipExpr !== 'none' ? `clip-path: ${boxClipExpr}` : '';
 
+  const surfaceBgCss = usesF2UPunch
+    ? 'background-color: transparent'
+    : hasImgGeoBorder
+    ? buildF2UQuadrantSurfaceCss(activeImageShape!, el.borderColor, el.shapeCutPx)
+    : isF2UGeoImage && isStandardImgFrame
+    ? 'background-color: transparent'
+    : geoUseQuadrantFill
+    ? buildF2UQuadrantSurfaceCss(
+        effectiveBoxShape!,
+        el.bgColor && el.bgColor !== 'transparent'
+          ? el.bgColor
+          : geoBorderShell
+          ? el.shapeMaskBgColor || '#FAF8F5'
+          : 'transparent',
+        el.shapeCutPx
+      )
+    : getSurfaceBackgroundCSS(el);
+
+  const effectiveBorderCss =
+    (isBoxF2UGeo && (geoUseQuadrantFill || isToyhouseFree)) || (isF2UGeoImage && isStandardImgFrame)
+      ? 'border: none'
+      : getBorderCSS(el);
+
+  const effectivePaddingCss = activeSplit
+    ? 'padding: 0px'
+    : hasImgGeoBorder
+    ? `padding: ${Math.max(el.padding || 0, Math.max(1, el.borderWidth))}px`
+    : getPaddingCSS(el);
+
+  const suppressBoxShadow = isBoxF2UGeo || (isF2UGeoImage && isStandardImgFrame);
+
+  const geoOuterShellStyle = geoBorderShell
+    ? [
+        buildF2UQuadrantSurfaceCss(effectiveBoxShape!, el.borderColor, el.shapeCutPx),
+        'border: none',
+        'border-radius: 0',
+        `padding: ${Math.max(1, el.borderWidth)}px`,
+        marginCss,
+        rotationCss,
+        opacityCss,
+        overflowRule,
+        `min-height: ${minHeightVal}`,
+        maxHeightCss,
+        aspectRatioCss,
+        cursorCss,
+        pointerEventsCss,
+        userSelectCss,
+        'box-sizing: border-box',
+        el.autoHeight
+          ? 'height: auto; position: relative'
+          : isFreeformFixed
+          ? 'position: absolute; top: 0; right: 0; bottom: 0; left: 0'
+          : 'height: 100%; position: relative',
+        'display: flex',
+        'flex-direction: column',
+        animDurationCss,
+        !isToyhouseFree ? 'transition: transform 0.22s ease, box-shadow 0.22s ease, opacity 0.22s ease' : '',
+      ]
+        .filter(Boolean)
+        .join('; ')
+    : '';
+
   const baseStyle = [
-    usesF2UPunch ? 'background-color: transparent' : getSurfaceBackgroundCSS(el),
+    surfaceBgCss,
     `color: ${el.textColor}`,
-    getBorderCSS(el),
+    effectiveBorderCss,
     `border-radius: ${effectiveBoxRadius}`,
-    activeSplit ? 'padding: 0px' : getPaddingCSS(el),
-    marginCss,
+    effectivePaddingCss,
+    geoBorderShell ? '' : marginCss,
     `font-size: ${el.fontSize}px`,
     `font-family: ${el.googleFont ? `'${el.googleFont}', ` : ''}${getFontFamilyCSS(el.fontFamily)}`,
     `font-weight: ${el.fontWeight === 'bold' ? '700' : el.fontWeight === 'medium' ? '500' : '400'}`,
@@ -737,22 +882,24 @@ export function renderInnerElementHTML(
     el.fontStyle === 'italic' ? 'font-style: italic' : '',
     el.textDecoration === 'underline' ? 'text-decoration: underline' : '',
     textShadowCss,
-    shadowVal !== 'none' ? `box-shadow: ${shadowVal}` : '',
+    !suppressBoxShadow && shadowVal !== 'none' ? `box-shadow: ${shadowVal}` : '',
     glassCss,
-    rotationCss,
-    opacityCss,
-    overflowRule,
+    geoBorderShell ? '' : rotationCss,
+    geoBorderShell ? '' : opacityCss,
+    geoBorderShell ? 'overflow: hidden' : overflowRule,
     maskCss,
     boxClipCss,
-    `min-height: ${minHeightVal}`,
-    maxHeightCss,
-    aspectRatioCss,
+    geoBorderShell ? 'min-height: 0' : `min-height: ${minHeightVal}`,
+    geoBorderShell ? '' : maxHeightCss,
+    geoBorderShell ? '' : aspectRatioCss,
     wordBreakCss,
-    cursorCss,
-    pointerEventsCss,
-    userSelectCss,
+    geoBorderShell ? '' : cursorCss,
+    geoBorderShell ? '' : pointerEventsCss,
+    geoBorderShell ? '' : userSelectCss,
     'box-sizing: border-box',
-    el.autoHeight
+    geoBorderShell
+      ? `width: 100%; ${el.autoHeight ? 'height: auto' : 'height: 100%'}; flex: 1; position: relative`
+      : el.autoHeight
       ? 'height: auto; position: relative'
       : isFreeformFixed
       ? 'position: absolute; top: 0; right: 0; bottom: 0; left: 0'
@@ -760,8 +907,8 @@ export function renderInnerElementHTML(
     'display: flex',
     'flex-direction: column',
     `justify-content: ${justifyMap[el.verticalAlign || 'center']}`,
-    animDurationCss,
-    !isToyhouseFree ? 'transition: transform 0.22s ease, box-shadow 0.22s ease, opacity 0.22s ease' : '',
+    geoBorderShell ? '' : animDurationCss,
+    !geoBorderShell && !isToyhouseFree ? 'transition: transform 0.22s ease, box-shadow 0.22s ease, opacity 0.22s ease' : '',
     rawInlineCss,
   ]
     .filter(Boolean)
@@ -781,9 +928,11 @@ export function renderInnerElementHTML(
     .filter(Boolean)
     .join(' ');
 
+  let wrapBoxLinkAfterGeo = false;
+
   const finalizeElementHTML = (rawHtml: string): string => {
     let out = rawHtml;
-    if (f2uPunchHtml || overlaysHtml) {
+    if (f2uPunchHtml || overlaysHtml || geoCornerOverlayHtml) {
       const insertClose = out.lastIndexOf('</div>') !== -1 ? '</div>' : '</a>';
       const idx = out.lastIndexOf(insertClose);
       if (idx !== -1) {
@@ -791,8 +940,16 @@ export function renderInnerElementHTML(
           out.slice(0, idx) +
           (f2uPunchHtml ? `\n${f2uPunchHtml}` : '') +
           (overlaysHtml ? `\n${overlaysHtml}` : '') +
+          (geoCornerOverlayHtml ? `\n${geoCornerOverlayHtml}` : '') +
           out.slice(idx);
       }
+    }
+    if (geoOuterShellStyle) {
+      const innerClean = out.replace(`class="${classes}" `, '').replace(`class="${classes}"`, '');
+      out = `<div class="${classes}" style="${geoOuterShellStyle}">${innerClean}</div>`;
+    }
+    if (wrapBoxLinkAfterGeo && el.linkUrl && !el.collapsible) {
+      out = `<a href="${el.linkUrl}" target="${el.linkTarget || '_blank'}" rel="noopener noreferrer" style="text-decoration: none; color: inherit; display: block; height: 100%;" title="${escapeHtmlAttr(el.tooltip || el.content || 'Link')}">${out}</a>`;
     }
     if (maskCss && maskRingOverlaysHtml) {
       out = `<div style="position: relative; width: 100%; height: ${el.autoHeight ? 'auto' : '100%'};">\n${out}\n${maskRingOverlaysHtml}\n</div>`;
@@ -1126,7 +1283,15 @@ export function renderInnerElementHTML(
     case 'image': {
       const activeShape = el.imageShape || el.boxClipShape;
       const isCircle = activeShape === 'circle';
-      const clipPath = !isToyhouseFree ? getImageClipPath(activeShape) : 'none';
+      const clipPath = !isToyhouseFree ? getImageClipPath(activeShape, el.shapeCutPx) : 'none';
+      const geoImgMaskHtml =
+        isToyhouseFree && isF2UGeometricShape(activeShape)
+          ? `<div style="position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 5; ${buildF2UCornerMaskOverlayCss(
+              activeShape,
+              hasImgGeoBorder ? el.borderColor : el.shapeMaskBgColor || '#FAF8F5',
+              el.shapeCutPx
+            )}"></div>`
+          : '';
       const shapeRadiusOverride = getShapeBorderRadiusOverride(activeShape);
       const isPolaroid = el.frameStyle === 'polaroid' || activeShape === 'polaroid';
       const isFilmstrip = el.frameStyle === 'filmstrip';
@@ -1245,6 +1410,7 @@ export function renderInnerElementHTML(
         <div style="position: relative; ${circleBoxSizeCss} overflow: hidden; border-radius: ${borderRadiusCss};">
           ${bgInner}
           ${overlayHtml}
+          ${geoImgMaskHtml}
         </div>
       `;
       } else {
@@ -1253,6 +1419,7 @@ export function renderInnerElementHTML(
           <img class="${hasHoverSwap ? 'dbx-img-primary-swap' : ''}" src="${primaryImgSrc}" alt="${el.content}" style="${imgCoreStyle}" />
           ${hasHoverSwap ? `<img class="dbx-img-swap" src="${el.hoverImageUrl}" alt="${el.content}" style="${imgCoreStyle} position: absolute; top: 0; right: 0; bottom: 0; left: 0; opacity: 0;" />` : ''}
           ${overlayHtml}
+          ${geoImgMaskHtml}
         </div>
       `;
       }
@@ -1292,10 +1459,22 @@ export function renderInnerElementHTML(
     </div>`;
     }
 
-    case 'button':
-      return `<a href="${el.url || '#'}" class="${classes} ${isToyhouse ? (isFreeformFixed && !el.autoHeight ? 'btn' : 'btn btn-block') : ''}" style="${baseStyle}; flex-direction: row; align-items: center; justify-content: center; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%; '}cursor: pointer;">
+    case 'button': {
+      const btnCls = `${classes} ${isToyhouse ? (isFreeformFixed && !el.autoHeight ? 'btn' : 'btn btn-block') : ''}`;
+      if (isBoxF2UGeo && hasUniformBorder && (!hasCustomBgSurface || isToyhouseFree)) {
+        const innerBtnBg = buildF2UQuadrantSurfaceCss(
+          effectiveBoxShape!,
+          el.bgColor && el.bgColor !== 'transparent' ? el.bgColor : el.shapeMaskBgColor || '#FAF8F5',
+          el.shapeCutPx
+        );
+        return `<a href="${el.url || '#'}" class="${btnCls}" style="${baseStyle}; ${buildF2UQuadrantSurfaceCss(effectiveBoxShape!, el.borderColor, el.shapeCutPx)}; padding: ${Math.max(1, el.borderWidth)}px; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%; '}cursor: pointer;">
+      <span style="width: 100%; height: 100%; flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; box-sizing: border-box; ${getPaddingCSS(el)}; ${innerBtnBg}">${el.content}</span>
+    </a>`;
+      }
+      return `<a href="${el.url || '#'}" class="${btnCls}" style="${baseStyle}; flex-direction: row; align-items: center; justify-content: center; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%; '}cursor: pointer;">
       <span>${el.content}</span>
     </a>`;
+    }
 
     case 'stat_bar': {
       const pct = Math.max(0, Math.min(100, parseInt(el.subContent || '75', 10) || 75));
@@ -1528,11 +1707,11 @@ ${nodesHtml}
     case 'pure_ring':
     case 'pure_pill':
     case 'pure_diamond':
+    case 'pure_hexagon':
+    case 'pure_octagon':
     case 'pure_star': {
       const shapeClip =
-        !isToyhouseFree && el.type === 'pure_diamond'
-          ? '; clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)'
-          : !isToyhouseFree && el.type === 'pure_star'
+        !isToyhouseFree && el.type === 'pure_star'
           ? '; clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)'
           : '';
       const flexDirOverride = el.type === 'pure_flex_row' || el.type === 'pure_banner' ? '; flex-direction: row; flex-wrap: wrap; align-items: center' : '';
@@ -1544,11 +1723,8 @@ ${nodesHtml}
       const innerContent = usesF2UPunch
         ? `<div style="position: relative; z-index: 2; flex: 1; display: flex; flex-direction: column; min-height: 0; width: 100%; height: 100%;">${rawBody}</div>`
         : rawBody;
-      const pureOut = `<div class="${classes}" style="${baseStyle}${flexDirOverride}${shapeClip}">${innerContent}</div>`;
-      if (el.linkUrl && !el.collapsible) {
-        return `<a href="${el.linkUrl}" target="${el.linkTarget || '_blank'}" rel="noopener noreferrer" style="text-decoration: none; color: inherit; display: block; height: 100%;" title="${escapeHtmlAttr(el.tooltip || el.content || 'Link')}">${pureOut}</a>`;
-      }
-      return pureOut;
+      wrapBoxLinkAfterGeo = Boolean(el.linkUrl && !el.collapsible);
+      return `<div class="${classes}" style="${baseStyle}${flexDirOverride}${shapeClip}">${innerContent}</div>`;
     }
 
     case 'pure_line': {
@@ -1635,6 +1811,14 @@ ${nodesHtml}
 
     case 'pure_link': {
       const target = el.linkTarget || '_blank';
+      if (isBoxF2UGeo && hasUniformBorder && (!hasCustomBgSurface || isToyhouseFree)) {
+        const innerLinkBg = buildF2UQuadrantSurfaceCss(
+          effectiveBoxShape!,
+          el.bgColor && el.bgColor !== 'transparent' ? el.bgColor : el.shapeMaskBgColor || '#FAF8F5',
+          el.shapeCutPx
+        );
+        return `<a href="${escapeHtmlAttr(el.url || '#')}" target="${target}" rel="noopener noreferrer" class="${classes}" style="${baseStyle}; ${buildF2UQuadrantSurfaceCss(effectiveBoxShape!, el.borderColor, el.shapeCutPx)}; padding: ${Math.max(1, el.borderWidth)}px; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%;'}"><span style="width: 100%; height: 100%; flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; box-sizing: border-box; ${getPaddingCSS(el)}; ${innerLinkBg}">${faInlineIconHtml}<span>${el.content || 'Link'}</span></span></a>`;
+      }
       return `<a href="${escapeHtmlAttr(el.url || '#')}" target="${target}" rel="noopener noreferrer" class="${classes}" style="${baseStyle}; flex-direction: row; align-items: center; justify-content: center; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%;'}">${faInlineIconHtml}<span>${el.content || 'Link'}</span></a>`;
     }
 
@@ -1748,11 +1932,7 @@ ${nodesHtml}
         innerOutput = `<div class="${classes}" style="${baseStyle}">${usesF2UPunch ? `<div style="position: relative; z-index: 2; flex: 1; display: flex; flex-direction: column; width: 100%;">${boxBody}</div>` : boxBody}</div>`;
       }
 
-      if (el.linkUrl && !el.collapsible) {
-        return `<a href="${el.linkUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration: none; color: inherit; display: block; height: 100%;" title="${escapeHtmlAttr(el.tooltip || el.content || 'Card Link')}">
-          ${innerOutput}
-        </a>`;
-      }
+      wrapBoxLinkAfterGeo = Boolean(el.linkUrl && !el.collapsible);
       return innerOutput;
     }
   }
@@ -1856,7 +2036,6 @@ export function generatePlatformExport(
 
     const hasDiamondOrClip = activeElements.some(
       (e) =>
-        e.type === 'pure_diamond' ||
         e.type === 'pure_star' ||
         !isF2USafeShape(e.imageShape) ||
         !isF2USafeShape(e.boxClipShape) ||
@@ -1866,8 +2045,8 @@ export function generatePlatformExport(
       warnings.push({
         severity: 'warning',
         code: 'TH_F2U_CLIP_NOTE',
-        message: 'CSS clip-path polygon shapes (Diamond/Hexagon/Octagon/Star/Heart/Shield/Bevel/Ticket) are masked in F2U mode.',
-        suggestion: 'Circle, Pill, Arch, Leaf, and 4-Corner Radius use pure CSS border-radius and stay 100% F2U safe.',
+        message: 'Complex SVG/polygon clip-path shapes (Star/Heart/Shield/Ticket/Scallop/Cross) are masked in F2U mode.',
+        suggestion: 'Hexagon, Diamond, Octagon, Bevel, Circle, Pill, Arch & Leaf use F2U-safe CSS and stay active.',
       });
     }
 

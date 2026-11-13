@@ -19,6 +19,7 @@ import {
   Grid,
   Heading1,
   Heart,
+  Hexagon,
   History,
   IdCard,
   Image as ImageIcon,
@@ -33,6 +34,7 @@ import {
   Minus,
   MousePointerClick,
   Network,
+  Octagon,
   Package,
   Palette,
   PanelLeftClose,
@@ -194,6 +196,10 @@ function resolvePurePrimitiveIcon(iconName: string) {
       return Minus;
     case 'diamond':
       return Diamond;
+    case 'hexagon':
+      return Hexagon;
+    case 'octagon':
+      return Octagon;
     case 'star':
       return Star;
     case 'image':

@@ -1,4 +1,5 @@
 import { DesignElement, ImageShape, TargetPlatform } from '../types/schema';
+import { isF2UGeometricShape } from '../utils/f2uShapeCss';
 import { isModifierProOnly } from './modifierRenderer';
 
 export type F2UShieldCategory =
@@ -35,7 +36,8 @@ export function isF2USafeShape(shape?: ImageShape): boolean {
     shape === 'pill' ||
     shape === 'arch' ||
     shape === 'leaf' ||
-    shape === 'polaroid'
+    shape === 'polaroid' ||
+    isF2UGeometricShape(shape)
   );
 }
 
@@ -119,10 +121,10 @@ export function getElementF2UShieldReport(el: DesignElement): F2UShieldReport {
     });
   }
 
-  if (el.type === 'pure_diamond' || el.type === 'pure_star') {
+  if (el.type === 'pure_star') {
     items.push({
       key: 'pureShapeClip',
-      label: `Polygon Shape (${el.type === 'pure_diamond' ? 'Diamond' : 'Star'})`,
+      label: 'Polygon Shape (Star)',
       detail: 'CSS clip-path polygon is stripped on F2U; falls back to box radius',
       category: 'clip',
     });
@@ -132,7 +134,7 @@ export function getElementF2UShieldReport(el: DesignElement): F2UShieldReport {
     items.push({
       key: 'imageShape',
       label: `Clip Shape (${el.imageShape})`,
-      detail: 'Polygon/SVG image clip-path is stripped on F2U; Circle, Pill, Arch & Leaf stay active',
+      detail: 'Complex clip-path curves are stripped on F2U; Hexagon, Diamond, Octagon, Bevel, Circle, Pill, Arch & Leaf stay active',
       category: 'clip',
     });
   }
@@ -141,7 +143,7 @@ export function getElementF2UShieldReport(el: DesignElement): F2UShieldReport {
     items.push({
       key: 'boxClipShape',
       label: `Surface Cut (${el.boxClipShape})`,
-      detail: 'Polygon clip-path cut is stripped on F2U; Arch/Leaf/Circle/Pill stay active',
+      detail: 'Complex polygon clip-path is stripped on F2U; Hexagon, Diamond, Octagon, Bevel, Arch, Leaf, Circle & Pill stay active',
       category: 'clip',
     });
   }
