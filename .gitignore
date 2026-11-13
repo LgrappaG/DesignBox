@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Frontend production & cache
+dist/
+dist-ssr/
+*.tsbuildinfo
+
+# Tauri & Rust build/generated outputs
+src-tauri/target/
+src-tauri/gen/
+
+# Packaged binaries & installers
+*.exe
+*.msi
+*.msix
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+
+# Unreferenced local sample media in repository root
+/character_art.jpg
+
+# Environment & local configuration
+.env
+.env.*
+!.env.example
+
+# Logs & OS artifacts
+logs/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor directories
+.vscode/*
+!.vscode/extensions.json
+.idea/
+

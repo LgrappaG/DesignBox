@@ -1,0 +1,212 @@
+export interface AssetPreset {
+  id: string;
+  name: string;
+  category: 'stickers' | 'washi' | 'stamps' | 'badges';
+  type: 'image' | 'sticker' | 'washi_tape' | 'badge';
+  url?: string;
+  stickerIcon?: string;
+  defaultWidth: number;
+  defaultHeight: number;
+  label: string;
+  content: string;
+  bgColor?: string;
+  borderColor?: string;
+  borderStyle?: 'solid' | 'dashed' | 'dotted';
+}
+
+export const CURATED_ASSETS: AssetPreset[] = [
+  // Aesthetic Stickers & Seals
+  {
+    id: 'ast-star-seal',
+    name: 'Celestial Gold Star',
+    category: 'stickers',
+    type: 'sticker',
+    stickerIcon: '✦',
+    defaultWidth: 44,
+    defaultHeight: 44,
+    label: 'Gold Star Decal',
+    content: '',
+    bgColor: 'rgba(212, 163, 115, 0.25)',
+    borderColor: '#D4A373',
+  },
+  {
+    id: 'ast-sparkle',
+    name: 'Twin Sparkle',
+    category: 'stickers',
+    type: 'sticker',
+    stickerIcon: '✧',
+    defaultWidth: 40,
+    defaultHeight: 40,
+    label: 'Twin Sparkle',
+    content: '',
+    bgColor: 'transparent',
+    borderColor: 'transparent',
+  },
+  {
+    id: 'ast-crescent',
+    name: 'Crescent Moon',
+    category: 'stickers',
+    type: 'sticker',
+    stickerIcon: '☾',
+    defaultWidth: 42,
+    defaultHeight: 42,
+    label: 'Crescent Moon',
+    content: '',
+    bgColor: 'rgba(200, 109, 81, 0.15)',
+    borderColor: '#C86D51',
+  },
+  {
+    id: 'ast-wax-seal',
+    name: 'Archival Wax Seal',
+    category: 'stickers',
+    type: 'sticker',
+    stickerIcon: '♚',
+    defaultWidth: 48,
+    defaultHeight: 48,
+    label: 'Wax Seal Stamp',
+    content: '',
+    bgColor: '#C86D51',
+    borderColor: '#9E472D',
+  },
+  {
+    id: 'ast-heart-pin',
+    name: 'Affection Pin',
+    category: 'stickers',
+    type: 'sticker',
+    stickerIcon: '♥',
+    defaultWidth: 40,
+    defaultHeight: 40,
+    label: 'Affection Heart Pin',
+    content: '',
+    bgColor: 'rgba(235, 87, 87, 0.2)',
+    borderColor: '#EB5757',
+  },
+  {
+    id: 'ast-floral',
+    name: 'Pressed Daisy Flower',
+    category: 'stickers',
+    type: 'sticker',
+    stickerIcon: '✿',
+    defaultWidth: 44,
+    defaultHeight: 44,
+    label: 'Pressed Daisy',
+    content: '',
+    bgColor: 'rgba(122, 154, 130, 0.2)',
+    borderColor: '#7A9A82',
+  },
+
+  // Washi Tape Strips
+  {
+    id: 'ast-washi-kraft',
+    name: 'Vintage Kraft Tape',
+    category: 'washi',
+    type: 'washi_tape',
+    defaultWidth: 140,
+    defaultHeight: 28,
+    label: 'Kraft Paper Tape',
+    content: 'ARCHIVAL // RECORD',
+    bgColor: '#E2D5BE',
+    borderColor: '#C2B093',
+  },
+  {
+    id: 'ast-washi-caution',
+    name: 'Hazard Caution Strip',
+    category: 'washi',
+    type: 'washi_tape',
+    defaultWidth: 150,
+    defaultHeight: 28,
+    label: 'Hazard Strip',
+    content: 'WARNING // BOUNDARY',
+    bgColor: '#D4A373',
+    borderColor: '#2C2A28',
+  },
+  {
+    id: 'ast-washi-sage',
+    name: 'Sage Botanical Tape',
+    category: 'washi',
+    type: 'washi_tape',
+    defaultWidth: 130,
+    defaultHeight: 28,
+    label: 'Botanical Tape',
+    content: 'FLORA MEMOIRE',
+    bgColor: '#A3B899',
+    borderColor: '#6E8563',
+  },
+  {
+    id: 'ast-washi-noir',
+    name: 'Noir Grid Tape',
+    category: 'washi',
+    type: 'washi_tape',
+    defaultWidth: 140,
+    defaultHeight: 28,
+    label: 'Noir Grid Tape',
+    content: 'DOSSIER #09',
+    bgColor: '#33312E',
+    borderColor: '#55514C',
+  },
+
+  // Philatelic Stamps & Seals
+  {
+    id: 'ast-stamp-astral',
+    name: 'Astral Observatory Stamp',
+    category: 'stamps',
+    type: 'image',
+    url: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=300&auto=format&fit=crop&q=80',
+    defaultWidth: 110,
+    defaultHeight: 125,
+    label: 'Astral Stamp',
+    content: 'POSTAGE // 12¢',
+    borderColor: '#C86D51',
+  },
+  {
+    id: 'ast-stamp-portrait',
+    name: 'Victorian Rose Stamp',
+    category: 'stamps',
+    type: 'image',
+    url: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=300&auto=format&fit=crop&q=80',
+    defaultWidth: 110,
+    defaultHeight: 125,
+    label: 'Rose Vignette Stamp',
+    content: 'ROYAL HERBARIUM',
+    borderColor: '#7A9A82',
+  },
+
+  // Character & OC Badges
+  {
+    id: 'ast-badge-verified',
+    name: 'Canon Character Badge',
+    category: 'badges',
+    type: 'badge',
+    defaultWidth: 130,
+    defaultHeight: 34,
+    label: 'Canon Badge',
+    content: 'CANON CHARACTER',
+    bgColor: '#7A9A82',
+    borderColor: '#5E7D65',
+  },
+  {
+    id: 'ast-badge-wip',
+    name: 'Work In Progress Tag',
+    category: 'badges',
+    type: 'badge',
+    defaultWidth: 120,
+    defaultHeight: 34,
+    label: 'WIP Badge',
+    content: 'UNDER REVISION',
+    bgColor: '#D4A373',
+    borderColor: '#B88654',
+  },
+  {
+    id: 'ast-badge-restricted',
+    name: 'Classified / DNI Pill',
+    category: 'badges',
+    type: 'badge',
+    defaultWidth: 135,
+    defaultHeight: 34,
+    label: 'Classified Pill',
+    content: 'AUTHORIZED ONLY',
+    bgColor: '#C86D51',
+    borderColor: '#A85237',
+  },
+];
+
