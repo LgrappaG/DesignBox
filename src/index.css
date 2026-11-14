@@ -39,6 +39,60 @@
   --grid-dot: rgba(255, 255, 255, 0.11);
 }
 
+[data-theme='cute'] {
+  --bg-app: #FAF5FF;
+  --bg-panel: #FDF8FF;
+  --bg-panel-alt: #F3E8FF;
+  --bg-input: #FFFFFF;
+  --bg-canvas-well: #F5EBF9;
+  --border-main: #E9D5FF;
+  --border-strong: #A855F7;
+  --text-main: #3B234A;
+  --text-muted: #8B6F9C;
+  --accent: #EC4899;
+  --accent-hover: #A855F7;
+  --accent-soft: rgba(236, 72, 153, 0.14);
+  --ruler-bg: #F3E8FF;
+  --ruler-tick: #C084FC;
+  --grid-dot: rgba(168, 85, 247, 0.24);
+}
+
+/* Cute UI Micro-Details: softer rounded chrome, pastel sheen, pastel scrollbars */
+[data-theme='cute'] .soft-card {
+  border-radius: 14px;
+  box-shadow: 0 2px 10px rgba(236, 72, 153, 0.08);
+}
+
+[data-theme='cute'] .soft-btn,
+[data-theme='cute'] button:not(.rounded-full) {
+  border-radius: 10px;
+}
+
+[data-theme='cute'] .soft-input,
+[data-theme='cute'] input,
+[data-theme='cute'] select,
+[data-theme='cute'] textarea {
+  border-radius: 9px;
+}
+
+[data-theme='cute'] header {
+  background-image: linear-gradient(135deg, rgba(236, 72, 153, 0.06), rgba(168, 85, 247, 0.07));
+}
+
+[data-theme='cute'] .dbx-canvas-host {
+  border-radius: 16px !important;
+  box-shadow: 0 12px 30px rgba(168, 85, 247, 0.14), 0 4px 12px rgba(236, 72, 153, 0.1) !important;
+}
+
+[data-theme='cute'] ::-webkit-scrollbar-thumb {
+  background: var(--border-main);
+  border-radius: 999px;
+}
+
+[data-theme='cute'] ::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
 body {
   background-color: var(--bg-app);
   color: var(--text-main);

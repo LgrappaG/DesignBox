@@ -16,26 +16,33 @@ import {
   EyeOff,
   Focus,
   FolderPlus,
-  Frame,
   Hand,
   Lock,
   MousePointer,
   Minus,
   RotateCw,
-  Rows,
   Scissors,
+  Search,
   ShieldAlert,
   ShieldCheck,
   SplitSquareHorizontal,
   Square,
   Trash2,
+  Type,
   X,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
 import { DynamicRulerCanvas } from './DynamicRulers';
 import { BottomDock } from './BottomDock';
+import {
+  CanvasContextMenu,
+  CanvasContextMenuState,
+  FloatingSelectionBar,
+  SpotlightQuickAddModal,
+} from './CanvasOverlays';
 import { isPureContainerType } from '../data/purePrimitives';
+import { SearchableCatalogItem, STATIC_CATALOG } from '../data/searchCatalog';
 import {
   getElementF2UShieldReport,
   maskElementForF2USimulation,
@@ -59,6 +66,7 @@ import { PanDragState } from '../hooks/useViewportNavigation';
 import {
   BgPattern,
   CanvasGuide,
+  CustomWidgetBlueprint,
   DesignElement,
   ElementType,
   ExportResult,
@@ -70,9 +78,9 @@ import {
   SnapGuideLine,
   SplitModifier,
   TargetPlatform,
+  UiTheme,
 } from '../types/schema';
 import { getInnerBoxGeometry, getSplitPaneGeometry } from '../utils/canvasGeometry';
-import { StudioColorButton } from './shared/StudioColorPicker';
 
 export interface CanvasStageProps {
   elements: DesignElement[];
@@ -81,7 +89,7 @@ export interface CanvasStageProps {
   exportResult: ExportResult;
   layoutMode: LayoutMode;
   platform: TargetPlatform;
-  uiTheme: 'carbon' | 'paper';
+  uiTheme: UiTheme;
   canvasWidth: number;
   canvasHeight: number;
   canvasBg: string;
@@ -125,13 +133,38 @@ export interface CanvasStageProps {
   rightCollapsed: boolean;
   copied: boolean;
   swatches?: string[];
+  showRulers?: boolean;
+  showSpacingBadges?: boolean;
+  customBlueprints?: CustomWidgetBlueprint[];
+  spotlightOpen?: boolean;
+  onToggleSpotlight?: (open: boolean) => void;
+  onAddCatalogItemAtPosition?: (item: SearchableCatalogItem, x: number, y: number) => void;
+  onAdjustZIndex?: (delta: number) => void;
+  onBringToFront?: () => void;
+  onSendToBack?: () => void;
+  onDuplicateSelected?: () => void;
+  onToggleLock?: (id: string) => void;
+  onToggleHide?: (id: string) => void;
+  onUnlockAll?: () => void;
+  onSelectAll?: () => void;
+  onCopySelected?: () => void;
+  onPasteAtPosition?: (x?: number, y?: number) => void;
+  onCopyStyle?: () => void;
+  onPasteStyle?: () => void;
+  hasCopiedStyle?: boolean;
+  hasClipboardElement?: boolean;
+  onRotateSelected90?: () => void;
+  onFlipSelected?: (axis: 'h' | 'v') => void;
+  onPopOutFromContainer?: (childId: string) => void;
+  onSaveSelectedAsBlueprint?: () => void;
+  onUpdateElementById?: (id: string, patch: Partial<DesignElement>) => void;
   canvasRef: React.RefObject<HTMLDivElement>;
   canvasViewportRef: React.RefObject<HTMLDivElement>;
   canvasTransformRef: React.RefObject<HTMLDivElement>;
-  onChangeCanvasWidth: (w: number) => void;
-  onChangeCanvasHeight: (h: number) => void;
+  onChangeCanvasWidth?: (w: number) => void;
+  onChangeCanvasHeight?: (h: number) => void;
   onChangeCanvasBg: (bg: string) => void;
-  onChangeCanvasPattern: (pattern: BgPattern) => void;
+  onChangeCanvasPattern?: (pattern: BgPattern) => void;
   onToggleMagneticSnap: () => void;
   onChangeShowHybridOverlay: (v: boolean) => void;
   onChangeZoom: (z: number) => void;
@@ -245,14 +278,36 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
   previewViewport,
   rightCollapsed,
   copied,
-  swatches,
+  swatches = [],
+  showRulers = true,
+  showSpacingBadges = true,
+  customBlueprints = [],
+  spotlightOpen = false,
+  onToggleSpotlight,
+  onAddCatalogItemAtPosition,
+  onAdjustZIndex,
+  onBringToFront,
+  onSendToBack,
+  onDuplicateSelected,
+  onToggleLock,
+  onToggleHide,
+  onUnlockAll,
+  onSelectAll,
+  onCopySelected,
+  onPasteAtPosition,
+  onCopyStyle,
+  onPasteStyle,
+  hasCopiedStyle = false,
+  hasClipboardElement = false,
+  onRotateSelected90,
+  onFlipSelected,
+  onPopOutFromContainer,
+  onSaveSelectedAsBlueprint,
+  onUpdateElementById,
   canvasRef,
   canvasViewportRef,
   canvasTransformRef,
-  onChangeCanvasWidth,
-  onChangeCanvasHeight,
   onChangeCanvasBg,
-  onChangeCanvasPattern,
   onToggleMagneticSnap,
   onChangeShowHybridOverlay,
   onChangeZoom,
@@ -263,7 +318,6 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
   onToggleAutoNestDrop,
   onExitContainerIsolation,
   onEnterContainerIsolation,
-  onApplyQuickModifier,
   onSetCursorInViewport,
   onSetPanDrag,
   onSetMarqueeSelect,
@@ -298,6 +352,11 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
   onChangePreviewViewport,
   onOpenRightCodeTab,
 }) => {
+  const [contextMenu, setContextMenu] = React.useState<CanvasContextMenuState | null>(null);
+  const [spotlightTargetPos, setSpotlightTargetPos] = React.useState<{ x: number; y: number } | null>(
+    null
+  );
+
   const isToyhouseFreePlatform = platform === 'toyhouse_free' || platform === 'toyhouse_oc';
   const f2uShieldMap = React.useMemo(() => {
     const map = new Map<string, ReturnType<typeof getElementF2UShieldReport>>();
@@ -315,15 +374,80 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
     return count;
   }, [f2uShieldMap]);
 
+  const handleViewportDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('application/x-dbx-catalog')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  };
+
+  const handleViewportDrop = (e: React.DragEvent) => {
+    const raw = e.dataTransfer.getData('application/x-dbx-catalog');
+    if (!raw || !onAddCatalogItemAtPosition) return;
+    e.preventDefault();
+    try {
+      const parsed = JSON.parse(raw) as
+        | { kind: 'element'; elementType: ElementType }
+        | { kind: 'asset'; assetId: string }
+        | { kind: 'fa_icon'; faClass: string; label: string }
+        | { kind: 'blueprint'; blueprintId: string };
+      let matched: SearchableCatalogItem | undefined;
+      if (parsed.kind === 'element') {
+        matched = STATIC_CATALOG.find(
+          (i) => i.kind === 'element' && i.elementType === parsed.elementType
+        );
+      } else if (parsed.kind === 'asset') {
+        matched = STATIC_CATALOG.find(
+          (i) => i.kind === 'asset' && i.assetPreset?.id === parsed.assetId
+        );
+      } else if (parsed.kind === 'fa_icon') {
+        matched = STATIC_CATALOG.find(
+          (i) => i.kind === 'fa_icon' && i.faIcon?.cls === parsed.faClass
+        );
+      } else if (parsed.kind === 'blueprint') {
+        const bp = customBlueprints.find((b) => b.id === parsed.blueprintId);
+        if (bp) {
+          matched = {
+            id: `bp:${bp.id}`,
+            kind: 'blueprint',
+            categoryLabel: 'My Blueprints',
+            label: bp.name,
+            description: bp.description,
+            searchTags: [],
+            f2uSafe: true,
+            blueprint: bp,
+          };
+        }
+      }
+      if (matched) {
+        const pos = clientToCanvas(e.clientX, e.clientY);
+        onAddCatalogItemAtPosition(matched, Math.round(pos.x), Math.round(pos.y));
+      }
+    } catch {
+      // Ignore invalid external drag payload
+    }
+  };
+
+  const handleQuickAddPrimitiveAt = (type: ElementType, x: number, y: number) => {
+    if (onAddCatalogItemAtPosition) {
+      const matched = STATIC_CATALOG.find((i) => i.kind === 'element' && i.elementType === type);
+      if (matched) {
+        onAddCatalogItemAtPosition(matched, Math.round(x), Math.round(y));
+        return;
+      }
+    }
+    onAddElement(type);
+  };
+
   return (
     <main
       style={{ backgroundColor: 'var(--bg-canvas-well)' }}
       className="flex-1 flex flex-col overflow-hidden relative min-w-0"
     >
-      {/* Top Canvas Controls Bar */}
+      {/* Slim Top Canvas Controls Bar */}
       <div
         style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-main)' }}
-        className="min-h-10 py-1 border-b px-2.5 flex flex-wrap items-center justify-between text-[11px] shrink-0 gap-1.5"
+        className="min-h-9 py-1 border-b px-2.5 flex flex-wrap items-center justify-between text-[11px] shrink-0 gap-1.5"
       >
         <div className="flex items-center flex-wrap gap-1.5 min-w-0">
           <span
@@ -334,144 +458,15 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
           </span>
           <span style={{ color: 'var(--border-strong)' }} className="hidden sm:inline">|</span>
 
-          <div className="flex items-center flex-wrap gap-1 font-mono text-[10px]">
-            <span style={{ color: 'var(--text-muted)' }}>SIZE:</span>
-            <select
-              value={
-                ['760x540', '860x680', '760x820', '540x640', '1024x720'].includes(
-                  `${canvasWidth}x${canvasHeight}`
-                )
-                  ? `${canvasWidth}x${canvasHeight}`
-                  : 'custom'
-              }
-              onChange={(e) => {
-                if (e.target.value === 'custom') return;
-                const [w, h] = e.target.value.split('x').map(Number);
-                onChangeCanvasWidth(w);
-                onChangeCanvasHeight(h);
-              }}
-              style={{
-                backgroundColor: 'var(--bg-input)',
-                borderColor: 'var(--border-strong)',
-              }}
-              className="border rounded-[5px] px-1.5 py-0.5 max-w-[140px]"
-            >
-              <option value="760x540">Standard (760×540)</option>
-              <option value="860x680">Wide Dossier (860×680)</option>
-              <option value="760x820">Long Scroll (760×820)</option>
-              <option value="540x640">Carrd Card (540×640)</option>
-              <option value="1024x720">Desktop Wide (1024×720)</option>
-              <option value="custom">Custom ({canvasWidth}×{canvasHeight})</option>
-            </select>
-            <input
-              type="number"
-              min={100}
-              max={2400}
-              value={canvasWidth || ''}
-              onChange={(e) => {
-                const parsed = parseInt(e.target.value, 10);
-                onChangeCanvasWidth(isNaN(parsed) ? 0 : parsed);
-              }}
-              onBlur={() => {
-                onChangeCanvasWidth(Math.max(100, Math.min(2400, canvasWidth || 760)));
-              }}
-              style={{
-                backgroundColor: 'var(--bg-input)',
-                borderColor: 'var(--border-strong)',
-              }}
-              className="w-12 border rounded-[5px] px-1 py-0.5 text-center font-mono text-[11px]"
-              title="Custom Canvas Width (px)"
-            />
-            <span>×</span>
-            <input
-              type="number"
-              min={100}
-              max={2400}
-              value={canvasHeight || ''}
-              onChange={(e) => {
-                const parsed = parseInt(e.target.value, 10);
-                onChangeCanvasHeight(isNaN(parsed) ? 0 : parsed);
-              }}
-              onBlur={() => {
-                onChangeCanvasHeight(Math.max(100, Math.min(2400, canvasHeight || 540)));
-              }}
-              style={{
-                backgroundColor: 'var(--bg-input)',
-                borderColor: 'var(--border-strong)',
-              }}
-              className="w-12 border rounded-[5px] px-1 py-0.5 text-center font-mono text-[11px]"
-              title="Custom Canvas Height (px)"
-            />
-          </div>
-
-          <span style={{ color: 'var(--border-strong)' }} className="hidden sm:inline">|</span>
-
           <div className="flex items-center flex-wrap gap-1.5">
-            <span style={{ color: 'var(--text-muted)' }}>Bg:</span>
-            <StudioColorButton
-              compact
-              value={canvasBg}
-              onChange={onChangeCanvasBg}
-              fallbackHex="#FAF8F5"
-              allowTransparent
-              swatches={swatches}
-              title="Canvas Background Color"
-              className="h-6 px-1"
-            />
-            <button
-              type="button"
-              onClick={() => {
-                if (canvasBg === 'transparent') {
-                  onChangeCanvasBg(uiTheme === 'paper' ? '#FAF8F5' : '#161514');
-                } else {
-                  onChangeCanvasBg('transparent');
-                  onChangeCanvasPattern('none');
-                }
-              }}
-              style={
-                canvasBg === 'transparent'
-                  ? {
-                      backgroundColor: 'var(--accent)',
-                      color: '#fff',
-                      borderColor: 'var(--accent)',
-                    }
-                  : { backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }
-              }
-              className="border rounded-[5px] px-2 py-0.5 text-[10px] font-semibold flex items-center gap-1 transition"
-              title="Transparent Canvas: Removes outer card, borders & shadows on Toyhouse while keeping width/centering/dimensions"
-            >
-              <EyeOff className="w-3 h-3" />
-              <span>Transparent Canvas {canvasBg === 'transparent' ? '✓' : ''}</span>
-            </button>
-            <select
-              value={canvasPattern}
-              onChange={(e) => onChangeCanvasPattern(e.target.value as BgPattern)}
-              disabled={canvasBg === 'transparent'}
-              style={{
-                backgroundColor: 'var(--bg-input)',
-                borderColor: 'var(--border-strong)',
-                opacity: canvasBg === 'transparent' ? 0.4 : 1,
-              }}
-              className="border rounded-[5px] px-1.5 py-0.5 text-[10px] font-mono"
-              title="Canvas Background Grid / Pattern"
-            >
-              <option value="none">Pattern: None (Solid)</option>
-              <option value="dots">Pattern: Dots</option>
-              <option value="grid">Pattern: Square Grid</option>
-              <option value="cross_grid">Pattern: Cross Grid</option>
-              <option value="lines">Pattern: Ruled Lines</option>
-              <option value="stripes">Pattern: Diagonal Stripes</option>
-              <option value="checker">Pattern: Subtle Checker</option>
-            </select>
-
             <button
               type="button"
               onClick={onToggleMagneticSnap}
               style={
                 magneticSnap
                   ? {
-                      backgroundColor: 'var(--accent)',
-                      color: '#fff',
+                      backgroundColor: 'var(--accent-soft)',
+                      color: 'var(--accent)',
                       borderColor: 'var(--accent)',
                     }
                   : {
@@ -483,8 +478,32 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
               className="border rounded-[5px] px-2 py-0.5 text-[10px] font-semibold flex items-center gap-1 transition"
               title="Toggle Magnetic Center & Edge Snapping"
             >
-              <span>Magnetic Snap {magneticSnap ? 'ON' : 'OFF'}</span>
+              <span>Snap {magneticSnap ? 'ON' : 'OFF'}</span>
             </button>
+
+            {layoutMode !== 'block' && (
+              <button
+                type="button"
+                onClick={onToggleAutoNestDrop}
+                style={
+                  autoNestDrop
+                    ? {
+                        backgroundColor: 'rgba(16,185,129,0.14)',
+                        borderColor: 'rgba(16,185,129,0.5)',
+                        color: '#10B981',
+                      }
+                    : {
+                        backgroundColor: 'var(--bg-input)',
+                        borderColor: 'var(--border-strong)',
+                        color: 'var(--text-muted)',
+                      }
+                }
+                className="border rounded-[5px] px-2 py-0.5 font-mono text-[9.5px] font-semibold"
+                title="When OFF (default), hold Alt while dragging an object onto a container box to nest inside"
+              >
+                {autoNestDrop ? 'Drop-to-Nest: ON' : 'Hold Alt to Nest'}
+              </button>
+            )}
 
             {isToyhouseFreePlatform && (
               <button
@@ -594,244 +613,84 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
         </div>
       </div>
 
-      {/* Sculpting & Object Modification Bar */}
-      {layoutMode !== 'block' && (
-        <div
-          style={{ backgroundColor: 'var(--bg-panel-alt)', borderColor: 'var(--border-main)' }}
-          className="min-h-8 border-b px-2.5 py-1 flex flex-wrap items-center justify-between gap-1.5 text-[10.5px] shrink-0"
-        >
-          <div className="flex items-center flex-wrap gap-1 min-w-0">
-            <span
-              style={{ color: 'var(--text-muted)' }}
-              className="font-mono text-[9.5px] uppercase mr-1"
-            >
-              Draw / Tool:
-            </span>
-            {(
-              [
-                { id: 'select', label: 'Select', icon: MousePointer },
-                { id: 'draw_box', label: 'Draw Box', icon: Square },
-                { id: 'draw_line', label: 'Draw Line', icon: Minus },
-                { id: 'draw_ring', label: 'Draw Ring', icon: CircleDot },
-              ] as const
-            ).map((tool) => {
-              const TIcon = tool.icon;
-              const active = canvasTool === tool.id;
-              return (
-                <button
-                  key={tool.id}
-                  type="button"
-                  onClick={() => onChangeCanvasTool(tool.id)}
-                  style={
-                    active
-                      ? {
-                          backgroundColor: 'var(--accent)',
-                          color: '#fff',
-                          borderColor: 'var(--accent)',
-                        }
-                      : { backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }
-                  }
-                  className="border rounded-[5px] px-2 py-0.5 flex items-center gap-1 font-medium hover:opacity-90 transition"
-                  title={
-                    tool.id === 'select'
-                      ? 'Pointer Select & Move (Esc)'
-                      : `Click and drag on canvas to ${tool.label}`
-                  }
-                >
-                  <TIcon className="w-3 h-3" />
-                  <span>{tool.label}</span>
-                </button>
-              );
-            })}
-
-            <div style={{ backgroundColor: 'var(--border-main)' }} className="h-4 w-px mx-1" />
-
-            <button
-              type="button"
-              onClick={onToggleAutoNestDrop}
-              style={
-                autoNestDrop
-                  ? {
-                      backgroundColor: 'rgba(16,185,129,0.14)',
-                      borderColor: 'rgba(16,185,129,0.5)',
-                      color: '#10B981',
-                    }
-                  : {
-                      backgroundColor: 'var(--bg-input)',
-                      borderColor: 'var(--border-strong)',
-                      color: 'var(--text-muted)',
-                    }
-              }
-              className="border rounded-[5px] px-2 py-0.5 font-mono text-[9.5px] font-semibold"
-              title="When ON, dragging an object over a container box nests it inside (hold Shift to skip)"
-            >
-              Drop-to-Nest: {autoNestDrop ? 'ON' : 'OFF'}
-            </button>
-          </div>
-
-          <div className="flex items-center flex-wrap gap-1 min-w-0">
-            {editingContainer && (
-              <div className="flex items-center gap-1.5 bg-amber-500/15 border border-amber-500/40 text-amber-500 px-2 py-0.5 rounded-[5px] mr-1">
-                <Focus className="w-3 h-3" />
-                <span className="font-mono text-[9.5px] font-semibold">
-                  Inside: {editingContainer.label}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onExitContainerIsolation(editingContainer.id)}
-                  className="ml-1 px-1.5 py-0.2 rounded bg-amber-500 text-white text-[9px] font-bold flex items-center gap-0.5"
-                >
-                  <CornerUpLeft className="w-2.5 h-2.5" />
-                  Exit (Esc)
-                </button>
-              </div>
-            )}
-
-            {selectedElement && selectedIds.length <= 1 ? (
-              <>
-                <span
-                  style={{ color: 'var(--text-muted)' }}
-                  className="font-mono text-[9.5px] uppercase mr-0.5"
-                >
-                  Quick Modifiers:
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onApplyQuickModifier('split', { axis: 'vertical', ratio: 50 })}
-                  style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                  className="border rounded-[5px] px-2 py-0.5 flex items-center gap-1 hover:border-accent"
-                  title="Split selected box vertically (Left | Right)"
-                >
-                  <SplitSquareHorizontal className="w-3 h-3 text-accent" />
-                  <span>Split |</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onApplyQuickModifier('split', { axis: 'horizontal', ratio: 50 })}
-                  style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                  className="border rounded-[5px] px-2 py-0.5 flex items-center gap-1 hover:border-accent"
-                  title="Split selected box horizontally (Top / Bottom)"
-                >
-                  <Rows className="w-3 h-3 text-accent" />
-                  <span>Split —</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onApplyQuickModifier('cutout_hole', {
-                      mode: 'transparent_hole',
-                      shape: 'circle',
-                      xPct: 50,
-                      yPct: 50,
-                    })
-                  }
-                  style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                  className="border rounded-[5px] px-2 py-0.5 flex items-center gap-1 hover:border-accent"
-                  title="Punch a real transparent circle hole through center of selected box"
-                >
-                  <CircleDot className="w-3 h-3 text-accent" />
-                  <span>Punch Hole</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onApplyQuickModifier('inner_frame', { frameStyle: 'corner_brackets' })
-                  }
-                  style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                  className="border rounded-[5px] px-2 py-0.5 flex items-center gap-1 hover:border-accent"
-                  title="Add corner bracket frames inside selected box"
-                >
-                  <Frame className="w-3 h-3 text-accent" />
-                  <span>Brackets</span>
-                </button>
-                {isPureContainerType(selectedElement.type) &&
-                  editingContainer?.id !== selectedElement.id && (
-                    <button
-                      type="button"
-                      onClick={() => onEnterContainerIsolation(selectedElement.id)}
-                      style={{
-                        backgroundColor: 'var(--accent)',
-                        color: '#fff',
-                        borderColor: 'var(--accent)',
-                      }}
-                      className="border rounded-[5px] px-2 py-0.5 flex items-center gap-1 font-semibold"
-                      title="Double-click container or click here to edit nested children inside"
-                    >
-                      <Focus className="w-3 h-3" />
-                      <span>Edit Inside</span>
-                    </button>
-                  )}
-              </>
-            ) : (
-              <span style={{ color: 'var(--text-muted)' }} className="text-[10px]">
-                Double-click any Container to edit inside • Select 2 shapes to Boolean Cutout
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* Synced Rulers + Viewport Stage */}
       <div className="flex-1 flex flex-col overflow-hidden min-h-0 relative">
-        <div
-          style={{ backgroundColor: 'var(--ruler-bg)', borderColor: 'var(--border-main)' }}
-          className="h-5 flex border-b shrink-0 overflow-hidden"
-        >
-          <button
-            type="button"
-            onClick={onCenterCanvasView}
-            onDoubleClick={onFitCanvasToView}
-            style={{
-              backgroundColor: 'var(--ruler-bg)',
-              borderColor: 'var(--border-main)',
-              color: 'var(--text-muted)',
-            }}
-            className="w-5 h-5 border-r shrink-0 flex items-center justify-center text-[8px] font-mono hover:opacity-80 transition"
-            title="Origin (0,0) • Click to center pan • Double-click to fit canvas"
-          >
-            px
-          </button>
-          <div className="flex-1 overflow-hidden">
-            <DynamicRulerCanvas
-              orientation="horizontal"
-              lengthPx={viewportSize.w}
-              originOffsetPx={canvasScreenLeft}
-              canvasExtentPx={canvasWidth}
-              zoom={zoom}
-              cursorCanvasPos={cursorInViewport ? cursorCoords.x : null}
-              uiTheme={uiTheme}
-              guides={guides}
-              onStartCreateGuide={(e) => {
-                if (e.button === 0) onStartGuideDrag('y', e.clientX, e.clientY);
-              }}
-              onResetPan={onCenterCanvasView}
-            />
-          </div>
-        </div>
-
-        <div className="flex-1 flex overflow-hidden min-h-0">
+        {showRulers && (
           <div
             style={{ backgroundColor: 'var(--ruler-bg)', borderColor: 'var(--border-main)' }}
-            className="w-5 border-r shrink-0 overflow-hidden"
+            className="h-5 flex border-b shrink-0 overflow-hidden"
           >
-            <DynamicRulerCanvas
-              orientation="vertical"
-              lengthPx={viewportSize.h}
-              originOffsetPx={canvasScreenTop}
-              canvasExtentPx={effectiveCanvasHeight}
-              zoom={zoom}
-              cursorCanvasPos={cursorInViewport ? cursorCoords.y : null}
-              uiTheme={uiTheme}
-              guides={guides}
-              onStartCreateGuide={(e) => {
-                if (e.button === 0) onStartGuideDrag('x', e.clientX, e.clientY);
+            <button
+              type="button"
+              onClick={onCenterCanvasView}
+              onDoubleClick={onFitCanvasToView}
+              style={{
+                backgroundColor: 'var(--ruler-bg)',
+                borderColor: 'var(--border-main)',
+                color: 'var(--text-muted)',
               }}
-              onResetPan={onCenterCanvasView}
-            />
+              className="w-5 h-5 border-r shrink-0 flex items-center justify-center text-[8px] font-mono hover:opacity-80 transition"
+              title="Origin (0,0) • Click to center pan • Double-click to fit canvas"
+            >
+              px
+            </button>
+            <div className="flex-1 overflow-hidden">
+              <DynamicRulerCanvas
+                orientation="horizontal"
+                lengthPx={viewportSize.w}
+                originOffsetPx={canvasScreenLeft}
+                canvasExtentPx={canvasWidth}
+                zoom={zoom}
+                cursorCanvasPos={cursorInViewport ? cursorCoords.x : null}
+                uiTheme={uiTheme}
+                guides={guides}
+                onStartCreateGuide={(e) => {
+                  if (e.button === 0) onStartGuideDrag('y', e.clientX, e.clientY);
+                }}
+                onResetPan={onCenterCanvasView}
+              />
+            </div>
           </div>
+        )}
+
+        <div className="flex-1 flex overflow-hidden min-h-0">
+          {showRulers && (
+            <div
+              style={{ backgroundColor: 'var(--ruler-bg)', borderColor: 'var(--border-main)' }}
+              className="w-5 border-r shrink-0 overflow-hidden"
+            >
+              <DynamicRulerCanvas
+                orientation="vertical"
+                lengthPx={viewportSize.h}
+                originOffsetPx={canvasScreenTop}
+                canvasExtentPx={effectiveCanvasHeight}
+                zoom={zoom}
+                cursorCanvasPos={cursorInViewport ? cursorCoords.y : null}
+                uiTheme={uiTheme}
+                guides={guides}
+                onStartCreateGuide={(e) => {
+                  if (e.button === 0) onStartGuideDrag('x', e.clientX, e.clientY);
+                }}
+                onResetPan={onCenterCanvasView}
+              />
+            </div>
+          )}
 
           <div
             ref={canvasViewportRef}
+            onDragOver={handleViewportDragOver}
+            onDrop={handleViewportDrop}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              const pos = clientToCanvas(e.clientX, e.clientY);
+              setContextMenu({
+                clientX: e.clientX,
+                clientY: e.clientY,
+                canvasX: Math.round(pos.x),
+                canvasY: Math.round(pos.y),
+                element: null,
+              });
+            }}
             onPointerEnter={() => onSetCursorInViewport(true)}
             onPointerLeave={() => onSetCursorInViewport(false)}
             onPointerDownCapture={(e) => {
@@ -873,8 +732,120 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                 ? 'crosshair'
                 : undefined,
             }}
-            className="flex-1 relative overflow-hidden"
+            className="flex-1 relative overflow-hidden isolate"
           >
+            {/* Floating Figma-Style Tool & Quick-Modifier Pill */}
+            {layoutMode !== 'block' && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{
+                  backgroundColor: 'color-mix(in srgb, var(--bg-panel) 88%, transparent)',
+                  borderColor: 'var(--border-strong)',
+                }}
+                className="absolute top-2.5 left-1/2 -translate-x-1/2 z-[88] h-[28px] border rounded-full px-1.5 py-0.5 backdrop-blur-md shadow-md flex items-center gap-0.5 max-w-[calc(100%-24px)] overflow-x-auto text-[10px]"
+              >
+                {(
+                  [
+                    { id: 'select', label: 'Select (V)', icon: MousePointer },
+                    { id: 'draw_box', label: 'Box (R)', icon: Square },
+                    { id: 'draw_line', label: 'Line (L)', icon: Minus },
+                    { id: 'draw_ring', label: 'Ring (O)', icon: CircleDot },
+                  ] as const
+                ).map((tool) => {
+                  const TIcon = tool.icon;
+                  const active = canvasTool === tool.id;
+                  return (
+                    <button
+                      key={tool.id}
+                      type="button"
+                      onClick={() => onChangeCanvasTool(tool.id)}
+                      style={
+                        active
+                          ? { backgroundColor: 'var(--accent)', color: '#fff' }
+                          : { color: 'var(--text-main)' }
+                      }
+                      className="rounded-full px-2 py-0.5 flex items-center gap-1 font-medium whitespace-nowrap hover:opacity-90 transition"
+                      title={
+                        tool.id === 'select'
+                          ? 'Pointer Select & Move (V / Esc)'
+                          : `Click and drag on canvas: ${tool.label}`
+                      }
+                    >
+                      <TIcon className="w-3 h-3" />
+                      <span>{tool.label}</span>
+                    </button>
+                  );
+                })}
+
+                <div style={{ backgroundColor: 'var(--border-main)' }} className="h-3.5 w-px mx-0.5 shrink-0" />
+
+                <button
+                  type="button"
+                  onClick={() => onAddElement('pure_paragraph')}
+                  className="rounded-full px-2 py-0.5 flex items-center gap-1 hover:bg-black/5 dark:hover:bg-white/5 whitespace-nowrap"
+                  title="Quick Add Paragraph Text (T)"
+                >
+                  <Type className="w-3 h-3 text-[var(--accent)]" />
+                  <span>+ Text (T)</span>
+                </button>
+
+                {onToggleSpotlight && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSpotlightTargetPos(null);
+                      onToggleSpotlight(true);
+                    }}
+                    className="rounded-full px-2 py-0.5 flex items-center gap-1 hover:bg-black/5 dark:hover:bg-white/5 whitespace-nowrap"
+                    title="Spotlight Quick Search & Add (/ or Ctrl+K)"
+                  >
+                    <Search className="w-3 h-3 text-[var(--accent)]" />
+                    <span>Search (/)</span>
+                  </button>
+                )}
+
+                {editingContainer && (
+                  <>
+                    <div style={{ backgroundColor: 'var(--border-main)' }} className="h-3.5 w-px mx-0.5 shrink-0" />
+                    <div className="flex items-center gap-1 bg-amber-500/15 border border-amber-500/40 text-amber-500 px-2 py-0.5 rounded-full whitespace-nowrap">
+                      <Focus className="w-3 h-3" />
+                      <span className="font-mono text-[9.5px] font-semibold">
+                        Inside: {editingContainer.label}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onExitContainerIsolation(editingContainer.id)}
+                        className="ml-1 px-1.5 py-0.2 rounded-full bg-amber-500 text-white text-[9px] font-bold flex items-center gap-0.5"
+                      >
+                        <CornerUpLeft className="w-2.5 h-2.5" />
+                        Exit
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {selectedElement &&
+                  selectedIds.length <= 1 &&
+                  isPureContainerType(selectedElement.type) &&
+                  editingContainer?.id !== selectedElement.id && (
+                    <>
+                      <div style={{ backgroundColor: 'var(--border-main)' }} className="h-3.5 w-px mx-0.5 shrink-0" />
+                      <button
+                        type="button"
+                        onClick={() => onEnterContainerIsolation(selectedElement.id)}
+                        style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
+                        className="rounded-full px-2 py-0.5 flex items-center gap-1 font-semibold whitespace-nowrap"
+                        title="Double-click or click to edit nested children inside"
+                      >
+                        <Focus className="w-3 h-3" />
+                        <span>Edit Inside</span>
+                      </button>
+                    </>
+                  )}
+              </div>
+            )}
+
             {isSpacePressed || panDrag?.moved ? (
               <div
                 style={{
@@ -942,7 +913,9 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                       <span>Transparent Canvas (No Outer Card on Toyhouse)</span>
                     </div>
                   )}
-                  {solvedRows.length === 0 && (
+                  {solvedRows.length === 0 &&
+                    canvasBg !== 'transparent' &&
+                    canvasTool === 'select' && (
                     <div
                       style={{ color: 'var(--text-muted)', borderColor: 'var(--border-strong)' }}
                       className="h-64 border border-dashed rounded-[8px] flex flex-col items-center justify-center gap-2 text-xs"
@@ -1064,9 +1037,13 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                     borderStyle: canvasBg === 'transparent' ? 'dashed' : 'solid',
                     backgroundImage:
                       canvasBg === 'transparent'
-                        ? 'radial-gradient(var(--grid-dot) 1px, transparent 1px)'
+                        ? uiTheme === 'cute'
+                          ? 'radial-gradient(var(--grid-dot) 1.6px, transparent 1.6px)'
+                          : 'radial-gradient(var(--grid-dot) 1px, transparent 1px)'
                         : canvasPattern === 'dots'
-                        ? 'radial-gradient(var(--grid-dot) 1px, transparent 1px)'
+                        ? uiTheme === 'cute'
+                          ? 'radial-gradient(var(--grid-dot) 1.6px, transparent 1.6px)'
+                          : 'radial-gradient(var(--grid-dot) 1px, transparent 1px)'
                         : canvasPattern === 'grid'
                         ? 'linear-gradient(var(--grid-dot) 1px, transparent 1px), linear-gradient(90deg, var(--grid-dot) 1px, transparent 1px)'
                         : canvasPattern === 'cross_grid'
@@ -1080,7 +1057,9 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                         : 'none',
                     backgroundSize:
                       canvasPattern === 'dots' || canvasBg === 'transparent'
-                        ? '16px 16px'
+                        ? uiTheme === 'cute'
+                          ? '18px 18px'
+                          : '16px 16px'
                         : canvasPattern === 'grid' || canvasPattern === 'checker'
                         ? '20px 20px'
                         : canvasPattern === 'cross_grid'
@@ -1089,17 +1068,9 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                   }}
                   className="dbx-canvas-host relative border rounded-[10px] shadow-xl overflow-hidden shrink-0"
                 >
-                  {canvasBg === 'transparent' && (
-                    <div
-                      style={{ color: 'var(--accent)' }}
-                      className="absolute top-1.5 left-2 text-[9px] font-mono flex items-center gap-1 opacity-70 z-30 pointer-events-none"
-                    >
-                      <EyeOff className="w-3 h-3" />
-                      <span>Transparent Canvas (No Outer Card on Toyhouse)</span>
-                    </div>
-                  )}
-
-                  {elements.length === 0 && (
+                  {elements.length === 0 &&
+                    canvasBg !== 'transparent' &&
+                    canvasTool === 'select' && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center pointer-events-none">
                       <div
                         onPointerDown={(e) => e.stopPropagation()}
@@ -1108,15 +1079,13 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                           borderColor: 'var(--border-strong)',
                           color: 'var(--text-main)',
                         }}
-                        className="p-5 rounded-[12px] border shadow-sm max-w-md space-y-2.5 pointer-events-auto"
+                        className="p-5 rounded-[12px] border shadow-sm max-w-md space-y-2.5 pointer-events-auto opacity-85"
                       >
                         <div className="font-semibold text-sm">
-                          Blank Canvas Ready ({canvasWidth}×{canvasHeight}px)
+                          Blank Canvas ({canvasWidth}×{canvasHeight}px)
                         </div>
                         <p style={{ color: 'var(--text-muted)' }} className="text-xs leading-relaxed">
-                          Click any block on the left sidebar to place it on the canvas, craft your
-                          own widget in <strong>+ Forge</strong>, or load a ready-made layout
-                          preset.
+                          Drag or click any block on the left, press <kbd className="font-mono">/</kbd> to quick-add, or load a preset.
                         </p>
                         <div className="flex items-center justify-center gap-2 pt-1">
                           <button
@@ -1254,7 +1223,8 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                     )
                   )}
 
-                  {spacingBadges.map((badge, idx) => (
+                  {showSpacingBadges &&
+                    spacingBadges.map((badge, idx) => (
                     <div
                       key={`sp-${idx}-${badge.axis}-${badge.x}-${badge.y}`}
                       style={{
@@ -1334,6 +1304,21 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                           }
                           onSelectElement(el.id, [el.id]);
                           onSetInlineEditId(el.id);
+                        }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (!selectedIds.includes(el.id)) {
+                            onSelectElement(el.id, [el.id]);
+                          }
+                          const pos = clientToCanvas(e.clientX, e.clientY);
+                          setContextMenu({
+                            clientX: e.clientX,
+                            clientY: e.clientY,
+                            canvasX: Math.round(pos.x),
+                            canvasY: Math.round(pos.y),
+                            element: el,
+                          });
                         }}
                         style={{
                           left: el.x,
@@ -1415,14 +1400,16 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                               onClick={(e) => e.stopPropagation()}
                               onPointerDown={(e) => onPointerDownElement(e, el, 'rotate')}
                               style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
-                              className="absolute -top-6 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full text-[9px] font-mono cursor-ew-resize flex items-center gap-0.5 shadow z-50"
+                              className="absolute -bottom-5 left-1/2 -translate-x-1/2 px-1.5 py-0.2 rounded-full text-[8.5px] font-mono cursor-ew-resize flex items-center gap-0.5 shadow z-50"
                               title="Drag horizontally to rotate element"
                             >
                               <RotateCw className="w-2.5 h-2.5" />
                               <span>
                                 {el.rotation || 0}°
                                 {isToyhouseFreePlatform && el.rotation && Math.round(el.rotation) % 90 !== 0
-                                  ? ' (0° F2U)'
+                                  ? el.type === 'pure_line'
+                                    ? ' (F2U Line)'
+                                    : ' (0° F2U)'
                                   : ''}
                               </span>
                             </div>
@@ -1511,7 +1498,16 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                             className="w-full h-full pointer-events-none overflow-hidden"
                             dangerouslySetInnerHTML={{
                               __html: renderInnerElementHTML(
-                                { ...el, rotation: 0 },
+                                {
+                                  ...el,
+                                  rotation:
+                                    el.type === 'pure_line' &&
+                                    isToyhouseFreePlatform &&
+                                    el.rotation &&
+                                    Math.round(el.rotation) % 90 !== 0
+                                      ? el.rotation
+                                      : 0,
+                                },
                                 platform.startsWith('toyhouse'),
                                 elements,
                                 false,
@@ -1580,6 +1576,28 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                       </div>
                     );
                   })}
+
+                  {/* Canva-style Floating Selection Mini Bar */}
+                  {selectedElement &&
+                    selectedIds.length >= 1 &&
+                    !inlineEditId &&
+                    !dragState &&
+                    !editingContainer && (
+                      <FloatingSelectionBar
+                        el={selectedElement}
+                        selectedElements={elements.filter((item) => selectedIds.includes(item.id))}
+                        swatches={swatches}
+                        onUpdateSelected={onUpdateSelected}
+                        onAdjustZIndex={onAdjustZIndex}
+                        onRotateSelected90={onRotateSelected90}
+                        onDuplicateSelected={onDuplicateSelected}
+                        onToggleLock={onToggleLock}
+                        onAlignMultiSelected={onAlignMultiSelected}
+                        onDistributeMultiSelected={onDistributeMultiSelected}
+                        onGroupSelectedIntoBox={onGroupSelectedIntoBox}
+                        onDeleteSelected={onDeleteSelected}
+                      />
+                    )}
 
                   {/* Container Isolation Mode Children Overlay */}
                   {editingContainer &&
@@ -1953,16 +1971,25 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
             </strong>
           </span>
           <span style={{ color: 'var(--text-muted)' }}>
-            Mobile Stack:{' '}
-            <strong
-              className={
-                exportResult.stats.responsiveScore === 'High'
-                  ? 'text-emerald-500'
-                  : 'text-amber-500'
-              }
-            >
-              {exportResult.stats.responsiveScore}
-            </strong>
+            {layoutMode === 'freeform' ? (
+              <>
+                PC Fidelity:{' '}
+                <strong className="text-emerald-500">1:1 Desktop Collage</strong>
+              </>
+            ) : (
+              <>
+                Mobile Stack:{' '}
+                <strong
+                  className={
+                    exportResult.stats.responsiveScore === 'High'
+                      ? 'text-emerald-500'
+                      : 'text-amber-500'
+                  }
+                >
+                  {exportResult.stats.responsiveScore}
+                </strong>
+              </>
+            )}
           </span>
           <span
             style={{ color: 'var(--text-muted)' }}
@@ -2048,6 +2075,92 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
           )}
         </div>
       </div>
+
+      {contextMenu && (
+        <CanvasContextMenu
+          menu={contextMenu}
+          swatches={swatches}
+          selectedIds={selectedIds}
+          canvasBg={canvasBg}
+          magneticSnap={magneticSnap}
+          guidesCount={guides.length}
+          hasCopiedStyle={hasCopiedStyle}
+          hasClipboardElement={hasClipboardElement}
+          onClose={() => setContextMenu(null)}
+          onUpdateElement={(id, patch) => {
+            if (onUpdateElementById) {
+              onUpdateElementById(id, patch);
+            } else {
+              onUpdateSelected(patch);
+            }
+          }}
+          onAdjustZIndex={onAdjustZIndex}
+          onBringToFront={onBringToFront}
+          onSendToBack={onSendToBack}
+          onRotateSelected90={onRotateSelected90}
+          onFlipSelected={onFlipSelected}
+          onDuplicateSelected={onDuplicateSelected}
+          onCopySelected={onCopySelected}
+          onPasteAtPosition={onPasteAtPosition}
+          onCopyStyle={onCopyStyle}
+          onPasteStyle={onPasteStyle}
+          onEnterContainerIsolation={onEnterContainerIsolation}
+          onPopOutFromContainer={onPopOutFromContainer}
+          onGroupSelectedIntoBox={onGroupSelectedIntoBox}
+          onSaveSelectedAsBlueprint={onSaveSelectedAsBlueprint}
+          onToggleLock={onToggleLock}
+          onToggleHide={onToggleHide}
+          onDeleteSelected={onDeleteSelected}
+          onOpenSpotlightAt={(x, y) => {
+            setSpotlightTargetPos({ x, y });
+            onToggleSpotlight?.(true);
+          }}
+          onQuickAddAtPosition={handleQuickAddPrimitiveAt}
+          onToggleTransparentCanvas={() =>
+            onChangeCanvasBg(
+              canvasBg === 'transparent'
+                ? uiTheme === 'cute'
+                  ? '#FDF8FF'
+                  : uiTheme === 'paper'
+                  ? '#FAF8F5'
+                  : '#161514'
+                : 'transparent'
+            )
+          }
+          onToggleMagneticSnap={onToggleMagneticSnap}
+          onFitCanvasToView={onFitCanvasToView}
+          onResetZoom={() => {
+            onChangeZoom(1);
+            onCenterCanvasView();
+          }}
+          onClearAllGuides={onClearAllGuides}
+          onSelectAll={onSelectAll}
+          onUnlockAll={onUnlockAll}
+          onCopyCode={onCopyCode}
+        />
+      )}
+
+      <SpotlightQuickAddModal
+        open={spotlightOpen}
+        isToyhouseFree={isToyhouseFreePlatform}
+        customBlueprints={customBlueprints}
+        onSelect={(item) => {
+          const targetX =
+            spotlightTargetPos?.x ?? Math.max(24, Math.round(canvasWidth / 2 - 90));
+          const targetY =
+            spotlightTargetPos?.y ?? Math.max(24, Math.round(canvasHeight / 2 - 50));
+          setSpotlightTargetPos(null);
+          if (onAddCatalogItemAtPosition) {
+            onAddCatalogItemAtPosition(item, targetX, targetY);
+          } else if (item.kind === 'element' && item.elementType) {
+            onAddElement(item.elementType);
+          }
+        }}
+        onClose={() => {
+          setSpotlightTargetPos(null);
+          onToggleSpotlight?.(false);
+        }}
+      />
     </main>
   );
 };

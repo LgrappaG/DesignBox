@@ -966,7 +966,8 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
                         onChange={(c) => updateSelected({ shapeMaskBgColor: c })}
                         swatches={swatches}
                         allowTransparent={false}
-                        label="Match canvas or card bg behind image corners"
+                        fullWidth
+                        title="Match canvas or card bg behind image corners"
                       />
                     </div>
                   </div>

@@ -49,7 +49,12 @@ export const LivePreviewModal: React.FC<LivePreviewModalProps> = ({
       : '100%';
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+    <div
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4"
+    >
       <div
         style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-strong)' }}
         className="border rounded-[12px] w-[96vw] max-w-[1400px] h-[92vh] overflow-hidden shadow-2xl flex flex-col"
@@ -97,6 +102,7 @@ export const LivePreviewModal: React.FC<LivePreviewModalProps> = ({
                   { id: 'th_light', label: 'TH Light' },
                   { id: 'th_pink', label: 'TH Pink' },
                   { id: 'th_teal', label: 'TH Teal' },
+                  { id: 'th_cute', label: 'TH Cute ♡' },
                   { id: 'paper', label: 'Paper' },
                 ] as const
               ).map((s) => (

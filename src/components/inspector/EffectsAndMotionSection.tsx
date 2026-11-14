@@ -10,6 +10,7 @@ interface EffectsAndMotionSectionProps {
   updateSelected: (patch: Partial<DesignElement>) => void;
   isToyhouseFree: boolean;
   swatches?: string[];
+  showProControls?: boolean;
 }
 
 /** Elevation shadows, glassmorphism, custom shadows, modifier stack, interactivity & motion. */
@@ -18,7 +19,9 @@ export const EffectsAndMotionSection: React.FC<EffectsAndMotionSectionProps> = (
   updateSelected,
   isToyhouseFree,
   swatches,
+  showProControls = true,
 }) => {
+  const showProOnly = !isToyhouseFree || showProControls;
   return (
     <div className="space-y-3">
       {/* Elevation Shadow, Glass Blur & Seamless Toggle */}
@@ -94,19 +97,21 @@ export const EffectsAndMotionSection: React.FC<EffectsAndMotionSectionProps> = (
         </button>
 
         <div className="grid grid-cols-2 gap-2 items-center pt-0.5 text-[10px]">
-          <label>
-            <span style={{ color: 'var(--text-muted)' }} className="block text-[10px] mb-0.5">
-              Glass Blur ({el.glassBlur || 0}px)
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={16}
-              value={el.glassBlur || 0}
-              onChange={(e) => updateSelected({ glassBlur: parseInt(e.target.value, 10) || 0 })}
-              className="w-full"
-            />
-          </label>
+          {showProOnly && (
+            <label>
+              <span style={{ color: 'var(--text-muted)' }} className="block text-[10px] mb-0.5">
+                Glass Blur ({el.glassBlur || 0}px)
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={16}
+                value={el.glassBlur || 0}
+                onChange={(e) => updateSelected({ glassBlur: parseInt(e.target.value, 10) || 0 })}
+                className="w-full"
+              />
+            </label>
+          )}
           <label className="flex items-center gap-1.5 cursor-pointer pt-3">
             <input
               type="checkbox"
@@ -231,25 +236,27 @@ export const EffectsAndMotionSection: React.FC<EffectsAndMotionSectionProps> = (
         }}
         className="p-2.5 rounded-[8px] border space-y-2"
       >
-        <div className="grid grid-cols-2 gap-2">
-          <label>
-            <span style={{ color: 'var(--text-muted)' }} className="block mb-1 text-[10px]">
-              Hover Effect {isToyhouseFree ? '(Premium)' : ''}
-            </span>
-            <select
-              value={el.hoverEffect}
-              onChange={(e) => updateSelected({ hoverEffect: e.target.value as HoverEffect })}
-              style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-              className="w-full border rounded-[5px] px-1.5 py-1 text-[11px]"
-            >
-              <option value="none">None</option>
-              <option value="lift">Hover Lift (-4px)</option>
-              <option value="tilt">Scrapbook Tilt</option>
-              <option value="scale">Smooth Scale</option>
-              <option value="glow">Warm Glow</option>
-              <option value="fade">Soft Fade</option>
-            </select>
-          </label>
+        <div className={`grid gap-2 ${showProOnly ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          {showProOnly && (
+            <label>
+              <span style={{ color: 'var(--text-muted)' }} className="block mb-1 text-[10px]">
+                Hover Effect {isToyhouseFree ? '(Premium)' : ''}
+              </span>
+              <select
+                value={el.hoverEffect}
+                onChange={(e) => updateSelected({ hoverEffect: e.target.value as HoverEffect })}
+                style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+                className="w-full border rounded-[5px] px-1.5 py-1 text-[11px]"
+              >
+                <option value="none">None</option>
+                <option value="lift">Hover Lift (-4px)</option>
+                <option value="tilt">Scrapbook Tilt</option>
+                <option value="scale">Smooth Scale</option>
+                <option value="glow">Warm Glow</option>
+                <option value="fade">Soft Fade</option>
+              </select>
+            </label>
+          )}
 
           <label>
             <span style={{ color: 'var(--text-muted)' }} className="block mb-1 text-[10px]">

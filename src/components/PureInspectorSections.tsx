@@ -48,12 +48,12 @@ const BOX_SHAPE_OPTIONS: ReadonlyArray<{ id: ImageShape; label: string; f2u: boo
   { id: 'diamond', label: 'Diamond', f2u: true },
   { id: 'octagon', label: 'Octagon', f2u: true },
   { id: 'bevel', label: 'Bevel', f2u: true },
-  { id: 'ticket', label: 'Ticket', f2u: false },
-  { id: 'shield', label: 'Shield', f2u: false },
-  { id: 'cross_star', label: 'Sparkle', f2u: false },
-  { id: 'scallop', label: 'Scallop', f2u: false },
-  { id: 'star', label: 'Star', f2u: false },
-  { id: 'heart', label: 'Heart', f2u: false },
+  { id: 'ticket', label: 'Ticket', f2u: true },
+  { id: 'shield', label: 'Shield', f2u: true },
+  { id: 'cross_star', label: 'Sparkle', f2u: true },
+  { id: 'scallop', label: 'Scallop', f2u: true },
+  { id: 'star', label: 'Star', f2u: true },
+  { id: 'heart', label: 'Heart', f2u: true },
 ];
 
 const F2UBadge = () => (
@@ -85,6 +85,10 @@ export const PureSurfaceSculptorSection: React.FC<PureInspectorProps> = ({
       ? 'octagon'
       : 'rect');
   const isGeoBox = isF2UGeometricShape(activeBoxShape);
+  const isRadialCutoutBox =
+    activeBoxShape === 'ticket' ||
+    activeBoxShape === 'cross_star' ||
+    activeBoxShape === 'scallop';
   const hasCustomSurface =
     Boolean(el.bgImageUrl && el.bgImageUrl.trim()) ||
     Boolean(el.bgGradientTo && el.bgGradientTo !== '' && el.bgGradientTo !== el.bgColor) ||
@@ -160,7 +164,7 @@ export const PureSurfaceSculptorSection: React.FC<PureInspectorProps> = ({
             ))}
           </div>
 
-          {isGeoBox && (
+          {(isGeoBox || (isRadialCutoutBox && isToyhouseFree)) && (
             <div
               style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}
               className="mt-1.5 p-2 rounded-[6px] border space-y-2 text-[10px]"
@@ -228,7 +232,7 @@ export const PureSurfaceSculptorSection: React.FC<PureInspectorProps> = ({
                 </div>
               )}
 
-              {isToyhouseFree && (hasCustomSurface || el.bgColor === 'transparent') && (
+              {isToyhouseFree && (isRadialCutoutBox || hasCustomSurface || el.bgColor === 'transparent') && (
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-semibold opacity-80">Corner Mask Color</span>
                   <div className="w-28">
@@ -237,7 +241,8 @@ export const PureSurfaceSculptorSection: React.FC<PureInspectorProps> = ({
                       onChange={(c) => updateSelected({ shapeMaskBgColor: c })}
                       swatches={swatches}
                       allowTransparent={false}
-                      label="Match bg behind shape corners"
+                      fullWidth
+                      title="Match bg behind shape corners"
                     />
                   </div>
                 </div>

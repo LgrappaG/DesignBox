@@ -441,6 +441,7 @@ export interface StudioColorButtonProps {
   title?: string;
   label?: string;
   compact?: boolean;
+  dotOnly?: boolean;
   fullWidth?: boolean;
   allowTransparent?: boolean;
   allowAlpha?: boolean;
@@ -466,6 +467,7 @@ export const StudioColorButton: React.FC<StudioColorButtonProps> = ({
   title,
   label,
   compact = false,
+  dotOnly = false,
   fullWidth = false,
   allowTransparent = true,
   allowAlpha = true,
@@ -529,17 +531,22 @@ export const StudioColorButton: React.FC<StudioColorButtonProps> = ({
       setIsOpen(false);
     };
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsOpen(false);
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setIsOpen(false);
+      }
     };
     const handleReposition = () => updatePopoverPosition();
 
     window.addEventListener('pointerdown', handlePointerDown);
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
     window.addEventListener('resize', handleReposition);
     window.addEventListener('scroll', handleReposition, true);
     return () => {
       window.removeEventListener('pointerdown', handlePointerDown);
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleKeyDown, true);
       window.removeEventListener('resize', handleReposition);
       window.removeEventListener('scroll', handleReposition, true);
     };
@@ -561,43 +568,64 @@ export const StudioColorButton: React.FC<StudioColorButtonProps> = ({
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        disabled={disabled}
-        onClick={() => setIsOpen((prev) => !prev)}
-        title={title || displayText}
-        className={`group flex items-center gap-1.5 rounded-md border border-[var(--border-main)] bg-[var(--bg-input)] text-[var(--text-main)] hover:border-[var(--accent)] transition focus:outline-none focus:border-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed ${
-          compact ? 'px-1.5 py-1 h-7' : 'px-2 py-1.5 h-8'
-        } ${fullWidth ? 'w-full' : ''} ${
-          isOpen ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]/40' : ''
-        } ${className}`}
-      >
-        <span
+      {dotOnly ? (
+        <button
+          ref={triggerRef}
+          type="button"
+          disabled={disabled}
+          onClick={() => setIsOpen((prev) => !prev)}
+          title={title || displayText}
           style={CHECKERBOARD_STYLE}
-          className="relative w-4 h-4 rounded-[4px] border border-[var(--border-strong)] overflow-hidden shrink-0"
+          className={`relative w-4 h-4 rounded-full p-0 border border-[var(--border-strong)] hover:scale-110 transition shrink-0 overflow-hidden focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
+            isOpen ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]/40' : ''
+          } ${className}`}
         >
-          <span className="block w-full h-full" style={{ backgroundColor: swatchBg }} />
+          <span className="block w-full h-full rounded-full" style={{ backgroundColor: swatchBg }} />
           {parsed.isTransparent && (
             <span className="absolute inset-0 pointer-events-none block">
-              <span className="block w-[140%] h-[1.5px] bg-red-500 rotate-45 origin-center translate-y-[7px] -translate-x-[3px]" />
+              <span className="block w-[140%] h-[1.5px] bg-red-500 rotate-45 origin-center translate-y-[6.5px] -translate-x-[3px]" />
             </span>
           )}
-        </span>
-
-        {!compact && (
-          <span className="min-w-0 flex-1 text-left flex items-center justify-between gap-1">
-            {label ? (
-              <span className="text-[10px] font-medium text-[var(--text-muted)] truncate">
-                {label}
+        </button>
+      ) : (
+        <button
+          ref={triggerRef}
+          type="button"
+          disabled={disabled}
+          onClick={() => setIsOpen((prev) => !prev)}
+          title={title || displayText}
+          className={`group flex items-center gap-1.5 rounded-md border border-[var(--border-main)] bg-[var(--bg-input)] text-[var(--text-main)] hover:border-[var(--accent)] transition focus:outline-none focus:border-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed max-w-full overflow-hidden ${
+            compact ? 'px-1.5 py-1 h-7' : 'px-2 py-1.5 h-8'
+          } ${fullWidth ? 'w-full' : ''} ${
+            isOpen ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]/40' : ''
+          } ${className}`}
+        >
+          <span
+            style={CHECKERBOARD_STYLE}
+            className="relative w-4 h-4 rounded-[4px] border border-[var(--border-strong)] overflow-hidden shrink-0"
+          >
+            <span className="block w-full h-full" style={{ backgroundColor: swatchBg }} />
+            {parsed.isTransparent && (
+              <span className="absolute inset-0 pointer-events-none block">
+                <span className="block w-[140%] h-[1.5px] bg-red-500 rotate-45 origin-center translate-y-[7px] -translate-x-[3px]" />
               </span>
-            ) : null}
-            <span className="text-[10px] font-mono text-[var(--text-main)] truncate">
-              {displayText}
-            </span>
+            )}
           </span>
-        )}
-      </button>
+
+          {!compact && (
+            <span className="min-w-0 flex-1 text-left flex items-center justify-between gap-1">
+              {label ? (
+                <span className="text-[10px] font-medium text-[var(--text-muted)] truncate">
+                  {label}
+                </span>
+              ) : null}
+              <span className="text-[10px] font-mono text-[var(--text-main)] truncate">
+                {displayText}
+              </span>
+            </span>
+          )}
+        </button>
+      )}
 
       {isOpen &&
         typeof document !== 'undefined' &&

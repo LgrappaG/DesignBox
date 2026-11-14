@@ -45,6 +45,7 @@ import {
   RectangleHorizontal,
   Rows,
   Scissors,
+  Search,
   Share2,
   ShieldAlert,
   Sparkles,
@@ -56,9 +57,11 @@ import {
   Trash2,
   Type,
   Unlock,
+  X,
 } from 'lucide-react';
 import { AssetPreset, CURATED_ASSETS } from '../data/assets';
 import { PURE_PRIMITIVE_GROUPS } from '../data/purePrimitives';
+import { SearchableCatalogItem, searchStudioCatalog } from '../data/searchCatalog';
 import { GLOBAL_THEME_PRESETS } from '../engine/themeEngine';
 import { isFloatingCollageElement } from '../engine/layoutSolver';
 import { PanelResizeDragState } from '../hooks/useCanvasPointer';
@@ -266,6 +269,36 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   );
   const [draftTheme, setDraftTheme] = useState<GlobalThemePalette>(GLOBAL_THEME_PRESETS[0]);
   const [themeTargetScope, setThemeTargetScope] = useState<'all' | 'selected'>('all');
+  const [catalogSearch, setCatalogSearch] = useState('');
+
+  const searchResults = React.useMemo(() => {
+    if (!catalogSearch.trim()) return [];
+    return searchStudioCatalog(catalogSearch, isToyhouseFree, customBlueprints, 50);
+  }, [catalogSearch, isToyhouseFree, customBlueprints]);
+
+  const handleDragStartCatalog = (
+    e: React.DragEvent,
+    payload:
+      | { kind: 'element'; elementType: ElementType }
+      | { kind: 'asset'; assetId: string }
+      | { kind: 'fa_icon'; faClass: string; label: string }
+      | { kind: 'blueprint'; blueprintId: string }
+  ) => {
+    e.dataTransfer.setData('application/x-dbx-catalog', JSON.stringify(payload));
+    e.dataTransfer.effectAllowed = 'copy';
+  };
+
+  const handleClickSearchResult = (item: SearchableCatalogItem) => {
+    if (item.kind === 'element' && item.elementType) {
+      onAddElement(item.elementType);
+    } else if (item.kind === 'asset' && item.assetPreset) {
+      onAddAssetPreset(item.assetPreset);
+    } else if (item.kind === 'fa_icon' && item.faIcon) {
+      onApplyOrAddFaIcon(item.faIcon.cls, item.faIcon.label, 'watermark');
+    } else if (item.kind === 'blueprint' && item.blueprint) {
+      onAddCustomBlueprint(item.blueprint);
+    }
+  };
 
   if (leftCollapsed) {
     return (
@@ -376,7 +409,118 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           </button>
         </div>
 
+        {/* Unified Catalog Search Bar (Searches Shapes, Widgets, Assets, FA Icons & Blueprints) */}
+        <div
+          style={{ borderColor: 'var(--border-main)', backgroundColor: 'var(--bg-panel)' }}
+          className="px-2 py-1.5 border-b shrink-0"
+        >
+          <div
+            style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-[7px] border focus-within:border-[var(--accent)] transition"
+          >
+            <Search className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--text-muted)' }} />
+            <input
+              type="text"
+              value={catalogSearch}
+              onChange={(e) => setCatalogSearch(e.target.value)}
+              placeholder="Search box, spoiler, music, dni..."
+              className="w-full bg-transparent text-[11px] focus:outline-none min-w-0"
+            />
+            {catalogSearch && (
+              <button
+                type="button"
+                onClick={() => setCatalogSearch('')}
+                className="p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 shrink-0"
+                title="Clear search"
+              >
+                <X className="w-3 h-3" style={{ color: 'var(--text-muted)' }} />
+              </button>
+            )}
+          </div>
+        </div>
+
         <div ref={leftSplitContainerRef} className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          {catalogSearch.trim() ? (
+            <div
+              style={{ height: `${leftLibraryPct}%` }}
+              className="p-2.5 overflow-y-auto shrink-0 space-y-2"
+            >
+              <div className="flex items-center justify-between">
+                <span
+                  style={{ color: 'var(--text-muted)' }}
+                  className="text-[10px] font-mono uppercase tracking-wider"
+                >
+                  Search Results ({searchResults.length})
+                </span>
+                <span style={{ color: 'var(--text-muted)' }} className="text-[9px] font-mono">
+                  Click or drag to canvas
+                </span>
+              </div>
+              {searchResults.length === 0 ? (
+                <div
+                  style={{ color: 'var(--text-muted)' }}
+                  className="p-4 text-center text-[11px] border border-dashed rounded-[7px]"
+                >
+                  No matches for &ldquo;{catalogSearch}&rdquo;. Try tags like{' '}
+                  <span className="font-mono">avatar</span>, <span className="font-mono">spoiler</span>,{' '}
+                  <span className="font-mono">music</span>, <span className="font-mono">dni</span>.
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {searchResults.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      draggable
+                      onDragStart={(e) => {
+                        if (item.kind === 'element' && item.elementType) {
+                          handleDragStartCatalog(e, { kind: 'element', elementType: item.elementType });
+                        } else if (item.kind === 'asset' && item.assetPreset) {
+                          handleDragStartCatalog(e, { kind: 'asset', assetId: item.assetPreset.id });
+                        } else if (item.kind === 'fa_icon' && item.faIcon) {
+                          handleDragStartCatalog(e, {
+                            kind: 'fa_icon',
+                            faClass: item.faIcon.cls,
+                            label: item.faIcon.label,
+                          });
+                        } else if (item.kind === 'blueprint' && item.blueprint) {
+                          handleDragStartCatalog(e, { kind: 'blueprint', blueprintId: item.blueprint.id });
+                        }
+                      }}
+                      onClick={() => handleClickSearchResult(item)}
+                      style={{
+                        backgroundColor: 'var(--bg-panel-alt)',
+                        borderColor: 'var(--border-strong)',
+                      }}
+                      className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-[6px] border text-left hover:border-[var(--accent)] transition cursor-grab active:cursor-grabbing"
+                      title={item.description}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        {item.kind === 'fa_icon' && item.faIcon ? (
+                          <i className={`${item.faIcon.cls} w-4 text-center shrink-0`} style={{ color: 'var(--accent)' }} />
+                        ) : (
+                          <Sparkles className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--accent)' }} />
+                        )}
+                        <div className="min-w-0">
+                          <div className="text-[11px] font-semibold truncate">{item.label}</div>
+                          <div style={{ color: 'var(--text-muted)' }} className="text-[9.5px] truncate">
+                            {item.description}
+                          </div>
+                        </div>
+                      </div>
+                      <span
+                        style={{ backgroundColor: 'var(--bg-input)', color: 'var(--text-muted)' }}
+                        className="text-[8.5px] font-mono px-1.5 py-0.5 rounded shrink-0"
+                      >
+                        {item.categoryLabel}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
           {leftSidebarTab === 'blocks' && (
             <div
               style={{ height: `${leftLibraryPct}%` }}
@@ -395,12 +539,14 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                     return (
                       <button
                         key={item.type}
+                        draggable
+                        onDragStart={(e) => handleDragStartCatalog(e, { kind: 'element', elementType: item.type })}
                         onClick={() => onAddElement(item.type)}
                         style={{
                           backgroundColor: 'var(--bg-panel-alt)',
                           borderColor: 'var(--border-main)',
                         }}
-                        className="flex items-center gap-1.5 px-2 py-1 rounded-[6px] border text-[11px] hover:opacity-85 transition text-left"
+                        className="flex items-center gap-1.5 px-2 py-1 rounded-[6px] border text-[11px] hover:opacity-85 transition text-left cursor-grab active:cursor-grabbing"
                       >
                         <Icon className="w-3 h-3 shrink-0" style={{ color: 'var(--accent)' }} />
                         <span className="truncate">{item.label}</span>
@@ -423,12 +569,14 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                     return (
                       <button
                         key={item.type}
+                        draggable
+                        onDragStart={(e) => handleDragStartCatalog(e, { kind: 'element', elementType: item.type })}
                         onClick={() => onAddElement(item.type)}
                         style={{
                           backgroundColor: 'var(--bg-panel-alt)',
                           borderColor: 'var(--border-strong)',
                         }}
-                        className="flex items-center gap-1.5 px-2 py-1 rounded-[6px] border text-[11px] hover:opacity-90 transition text-left"
+                        className="flex items-center gap-1.5 px-2 py-1 rounded-[6px] border text-[11px] hover:opacity-90 transition text-left cursor-grab active:cursor-grabbing"
                       >
                         <Icon className="w-3 h-3 shrink-0" style={{ color: 'var(--accent)' }} />
                         <span className="truncate">{item.label}</span>
@@ -451,12 +599,14 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                     return (
                       <button
                         key={item.type}
+                        draggable
+                        onDragStart={(e) => handleDragStartCatalog(e, { kind: 'element', elementType: item.type })}
                         onClick={() => onAddElement(item.type)}
                         style={{
                           backgroundColor: 'var(--bg-panel-alt)',
                           borderColor: 'var(--border-main)',
                         }}
-                        className="flex items-center gap-1.5 px-2 py-1 rounded-[6px] border text-[11px] hover:opacity-90 transition text-left"
+                        className="flex items-center gap-1.5 px-2 py-1 rounded-[6px] border text-[11px] hover:opacity-90 transition text-left cursor-grab active:cursor-grabbing"
                       >
                         <Icon className="w-3 h-3 shrink-0" style={{ color: 'var(--accent)' }} />
                         <span className="truncate">{item.label}</span>
@@ -532,14 +682,13 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 className="p-2 rounded-[7px] border text-[10px] leading-snug space-y-1"
               >
                 <div className="flex items-center justify-between font-bold">
-                  <span style={{ color: 'var(--accent)' }}>Pure Blank Sculptable Primitives</span>
+                  <span style={{ color: 'var(--accent)' }}>Clean Shapes &amp; Containers</span>
                   <span className="font-mono text-[9px] px-1 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                    F2U Safe
+                    Click or Drag
                   </span>
                 </div>
                 <p style={{ color: 'var(--text-muted)' }}>
-                  Every primitive starts pure white (#FFFFFF) with zero preset effects. Sculpt any
-                  HTML &amp; F2U property in the Inspector.
+                  Click to add or drag any shape directly onto the canvas. Customize colors, frames &amp; borders on the right.
                 </p>
               </div>
 
@@ -559,6 +708,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                         <button
                           key={item.type}
                           type="button"
+                          draggable
+                          onDragStart={(e) => handleDragStartCatalog(e, { kind: 'element', elementType: item.type })}
                           onClick={() => onAddElement(item.type)}
                           title={item.desc}
                           style={{
@@ -566,15 +717,10 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                             color: 'var(--text-main)',
                             borderColor: 'var(--border-strong)',
                           }}
-                          className="flex items-center gap-1.5 px-2 py-1.5 rounded-[6px] border text-[11px] font-medium hover:border-[var(--accent)] transition text-left shadow-sm min-w-0"
+                          className="flex items-center gap-1.5 px-2 py-1.5 rounded-[6px] border text-[11px] font-medium hover:border-[var(--accent)] transition text-left shadow-sm min-w-0 cursor-grab active:cursor-grabbing"
                         >
                           <IconComp className="w-3 h-3 shrink-0" style={{ color: 'var(--accent)' }} />
                           <span className="truncate min-w-0 flex-1">{item.label}</span>
-                          {!item.f2uSafe && (
-                            <span className="text-[8px] font-mono px-1 rounded bg-amber-500/15 text-amber-600 shrink-0">
-                              PRO
-                            </span>
-                          )}
                         </button>
                       );
                     })}
@@ -633,12 +779,14 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                     <button
                       key={asset.id}
                       type="button"
+                      draggable
+                      onDragStart={(e) => handleDragStartCatalog(e, { kind: 'asset', assetId: asset.id })}
                       onClick={() => onAddAssetPreset(asset)}
                       style={{
                         backgroundColor: 'var(--bg-panel-alt)',
                         borderColor: 'var(--border-strong)',
                       }}
-                      className="flex items-center gap-2 p-1.5 rounded-[6px] border text-left hover:border-amber-500 transition group"
+                      className="flex items-center gap-2 p-1.5 rounded-[6px] border text-left hover:border-amber-500 transition group cursor-grab active:cursor-grabbing"
                       title={`Add ${asset.name} (${asset.defaultWidth}×${asset.defaultHeight})`}
                     >
                       {asset.url ? (
@@ -936,6 +1084,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 </div>
               </div>
             </div>
+          )}
+            </>
           )}
 
           {/* Horizontal Row Splitter between Catalog and Layers */}

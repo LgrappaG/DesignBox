@@ -4,13 +4,14 @@ import { compileVisualForgeBlueprintHTML } from '../../data/templates';
 import {
   CustomPropDefinition,
   CustomWidgetBlueprint,
+  UiTheme,
   VisualForgeConfig,
 } from '../../types/schema';
 
 export interface ObjectForgeModalProps {
   open: boolean;
   canvasBg: string;
-  uiTheme: 'carbon' | 'paper';
+  uiTheme: UiTheme;
   onClose: () => void;
   onCreateBlueprint: (bp: CustomWidgetBlueprint) => void;
 }
@@ -86,7 +87,12 @@ export const ObjectForgeModal: React.FC<ObjectForgeModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6">
+    <div
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-[200] bg-black/70 flex items-center justify-center p-6"
+    >
       <div
         style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-strong)' }}
         className="border rounded-[12px] max-w-4xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
@@ -444,8 +450,10 @@ export const ObjectForgeModal: React.FC<ObjectForgeModalProps> = ({
               >
                 <div
                   style={{
-                    backgroundColor: uiTheme === 'paper' ? '#F2EFE9' : '#242220',
-                    color: uiTheme === 'paper' ? '#2C2A28' : '#ece7df',
+                    backgroundColor:
+                      uiTheme === 'cute' ? '#FDF8FF' : uiTheme === 'paper' ? '#F2EFE9' : '#242220',
+                    color:
+                      uiTheme === 'cute' ? '#3B234A' : uiTheme === 'paper' ? '#2C2A28' : '#ece7df',
                     border: '1px solid #C86D51',
                     borderRadius: '8px',
                     padding: '12px',

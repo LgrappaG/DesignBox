@@ -11,6 +11,7 @@ import {
   FilePlus2,
   FolderClock,
   FolderOpen,
+  Heart,
   History,
   Keyboard,
   LayoutGrid,
@@ -23,10 +24,12 @@ import {
   Rows3,
   Save,
   Settings,
+  ShieldCheck,
+  Sparkles,
   Sun,
   Undo2,
 } from 'lucide-react';
-import { LayoutMode, TargetPlatform } from '../types/schema';
+import { LayoutMode, TargetPlatform, UiTheme } from '../types/schema';
 import {
   isTauriRuntime,
   RecentProjectEntry,
@@ -40,7 +43,8 @@ export interface TopBarProps {
   saveNotice: string | null;
   layoutMode: LayoutMode;
   platform: TargetPlatform;
-  uiTheme: 'carbon' | 'paper';
+  shieldedElementCount?: number;
+  uiTheme: UiTheme;
   canUndo: boolean;
   canRedo: boolean;
   bottomDockOpen: boolean;
@@ -76,6 +80,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   saveNotice,
   layoutMode,
   platform,
+  shieldedElementCount = 0,
   uiTheme,
   canUndo,
   canRedo,
@@ -115,8 +120,20 @@ export const TopBar: React.FC<TopBarProps> = ({
         setRecentMenuOpen(false);
       }
     };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setRecentMenuOpen(false);
+      }
+    };
     window.addEventListener('mousedown', onDocDown);
-    return () => window.removeEventListener('mousedown', onDocDown);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      window.removeEventListener('mousedown', onDocDown);
+      window.removeEventListener('keydown', onKeyDown, true);
+    };
   }, [recentMenuOpen]);
 
   return (
@@ -126,10 +143,20 @@ export const TopBar: React.FC<TopBarProps> = ({
     >
       <div className="flex items-center flex-wrap gap-1 min-w-0">
         <div
-          style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
-          className="px-2 py-0.5 rounded-[3px] font-mono font-bold text-xs tracking-wider shrink-0"
+          style={
+            uiTheme === 'cute'
+              ? {
+                  background: 'linear-gradient(135deg, var(--accent), var(--accent-hover))',
+                  color: '#fff',
+                }
+              : { backgroundColor: 'var(--accent)', color: '#fff' }
+          }
+          className={`px-2 py-0.5 font-mono font-bold text-xs tracking-wider shrink-0 flex items-center gap-1 ${
+            uiTheme === 'cute' ? 'rounded-full shadow-sm' : 'rounded-[3px]'
+          }`}
         >
-          DBX
+          <span>DBX</span>
+          {uiTheme === 'cute' && <span className="text-[10px] leading-none">♡</span>}
         </div>
         <div className="flex items-center gap-1 min-w-0">
           <span className="font-semibold text-xs tracking-tight shrink-0 hidden sm:inline">DesignBox</span>
@@ -361,16 +388,16 @@ export const TopBar: React.FC<TopBarProps> = ({
         </button>
       </div>
 
-      {/* Center: 3 Layout Modes Switcher */}
+      {/* Center: 3 Layout Modes Switcher (Freeform Collage Primary) */}
       <div
         style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}
         className="flex items-center p-0.5 rounded-[8px] border shrink-0 max-w-full overflow-x-auto"
       >
         {(
           [
-            { id: 'hybrid', label: '1. Dynamic Hybrid', icon: LayoutGrid },
-            { id: 'block', label: '2. Block Stack', icon: Rows3 },
-            { id: 'freeform', label: '3. Freeform Collage', icon: Move },
+            { id: 'freeform', label: '1. Freeform Collage', icon: Move },
+            { id: 'hybrid', label: '2. Dynamic Hybrid', icon: LayoutGrid },
+            { id: 'block', label: '3. Block Stack', icon: Rows3 },
           ] as const
         ).map((m) => {
           const Icon = m.icon;
@@ -398,43 +425,98 @@ export const TopBar: React.FC<TopBarProps> = ({
       <div className="flex items-center flex-wrap gap-1 min-w-0">
         <button
           onClick={onToggleTheme}
-          style={{
-            backgroundColor: 'var(--bg-panel-alt)',
-            borderColor: 'var(--border-strong)',
-          }}
-          className="flex items-center gap-1 px-2 py-1 rounded-[7px] border text-[11px] font-medium shrink-0"
-          title="Switch between Warm Oatmeal Paper UI & Cozy Carbon Dark UI"
+          style={
+            uiTheme === 'cute'
+              ? {
+                  backgroundColor: 'var(--accent-soft)',
+                  borderColor: 'var(--accent)',
+                  color: 'var(--accent)',
+                }
+              : {
+                  backgroundColor: 'var(--bg-panel-alt)',
+                  borderColor: 'var(--border-strong)',
+                }
+          }
+          className={`flex items-center gap-1 px-2 py-1 border text-[11px] font-medium shrink-0 transition ${
+            uiTheme === 'cute' ? 'rounded-full font-semibold' : 'rounded-[7px]'
+          }`}
+          title="Cycle Studio UI Theme: Carbon Dark → Warm Paper → Kawaii Cute"
         >
           {uiTheme === 'carbon' ? (
             <>
-              <Sun className="w-3.5 h-3.5 text-amber-400" />
+              <Moon className="w-3.5 h-3.5 text-amber-300" />
+              <span className="hidden 2xl:inline">Carbon</span>
+            </>
+          ) : uiTheme === 'paper' ? (
+            <>
+              <Sun className="w-3.5 h-3.5 text-amber-600" />
               <span className="hidden 2xl:inline">Paper</span>
             </>
           ) : (
             <>
-              <Moon className="w-3.5 h-3.5 text-stone-700" />
-              <span className="hidden 2xl:inline">Carbon</span>
+              <Heart className="w-3.5 h-3.5 fill-current" style={{ color: 'var(--accent)' }} />
+              <span className="hidden 2xl:inline">♡ Cute</span>
             </>
           )}
         </button>
 
-        <select
-          value={platform}
-          onChange={(e) => onChangePlatform(e.target.value as TargetPlatform)}
-          style={{
-            backgroundColor: 'var(--bg-input)',
-            borderColor: 'var(--border-strong)',
-            color: 'var(--text-main)',
-          }}
-          className="border rounded-[7px] px-1.5 py-1 text-[11px] font-medium focus:outline-none min-w-0 max-w-[140px] sm:max-w-[165px] xl:max-w-[185px]"
-        >
-          <option value="toyhouse_free">Toyhouse · Free (F2U - No Premium)</option>
-          <option value="toyhouse_premium">Toyhouse · Premium (Custom CSS)</option>
-          <option value="toyhouse_oc">Toyhouse · Character (OC Default)</option>
-          <option value="toyhouse_profile">Toyhouse · User Profile</option>
-          <option value="toyhouse_world">Toyhouse · World Page</option>
-          <option value="carrd_pro">Carrd Pro · Embed Code</option>
-        </select>
+        {/* Clean 2-way F2U vs Pro Segmented Switch */}
+        {(() => {
+          const isF2U = platform === 'toyhouse_free' || platform === 'toyhouse_oc';
+          return (
+            <div
+              style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+              className="flex items-center p-0.5 rounded-[8px] border shrink-0"
+              title={
+                isF2U
+                  ? shieldedElementCount > 0
+                    ? `F2U Free Mode active: ${shieldedElementCount} element(s) have Pro effects safely adapted without losing settings.`
+                    : 'F2U Free Mode: 100% Toyhouse Free compliant (zero <style> tags)'
+                  : 'Pro CSS Mode: <style> blocks, custom animations, glass blur & clip-path enabled'
+              }
+            >
+              <button
+                type="button"
+                onClick={() => onChangePlatform('toyhouse_free')}
+                style={
+                  isF2U
+                    ? {
+                        backgroundColor: 'rgba(16, 185, 129, 0.16)',
+                        color: '#059669',
+                        borderColor: 'rgba(16, 185, 129, 0.4)',
+                      }
+                    : { color: 'var(--text-muted)', borderColor: 'transparent' }
+                }
+                className="flex items-center gap-1 px-2 py-1 rounded-[6px] border text-[11px] font-bold transition whitespace-nowrap"
+              >
+                <ShieldCheck className="w-3 h-3 shrink-0" />
+                <span>F2U</span>
+                {isF2U && shieldedElementCount > 0 && (
+                  <span className="ml-0.5 px-1 py-0 rounded bg-amber-500/20 text-amber-600 dark:text-amber-300 font-mono text-[9.5px]">
+                    · {shieldedElementCount} adapted
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => onChangePlatform('toyhouse_premium')}
+                style={
+                  !isF2U
+                    ? {
+                        backgroundColor: 'var(--accent)',
+                        color: '#fff',
+                        borderColor: 'var(--accent)',
+                      }
+                    : { color: 'var(--text-muted)', borderColor: 'transparent' }
+                }
+                className="flex items-center gap-1 px-2 py-1 rounded-[6px] border text-[11px] font-bold transition whitespace-nowrap"
+              >
+                <Sparkles className="w-3 h-3 shrink-0" />
+                <span>Pro</span>
+              </button>
+            </div>
+          );
+        })()}
 
         <div
           style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}

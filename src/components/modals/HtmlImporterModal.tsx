@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { Code2, Layers, Palette, Sparkles, Upload } from 'lucide-react';
 import { parseToyhouseHtmlToDesign } from '../../engine/htmlImporter';
-import { DesignElement } from '../../types/schema';
+import { BgPattern, DesignElement, LayoutMode, UiTheme } from '../../types/schema';
 
 export interface HtmlImporterModalProps {
   open: boolean;
-  uiTheme: 'carbon' | 'paper';
+  uiTheme: UiTheme;
   canvasWidth: number;
   existingCount: number;
   maxRowIndex: number;
@@ -16,6 +16,13 @@ export interface HtmlImporterModalProps {
     mode: 'replace' | 'append';
     extractedSwatches: string[];
     applySwatches: boolean;
+    roundTripMeta?: {
+      mode?: LayoutMode;
+      canvasWidth?: number;
+      canvasHeight?: number;
+      canvasBg?: string;
+      canvasPattern?: BgPattern;
+    };
   }) => void;
 }
 
@@ -64,7 +71,12 @@ export const HtmlImporterModal: React.FC<HtmlImporterModalProps> = ({
   const totalBlocks = preview?.elements.length ?? 0;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-6">
+    <div
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-[200] bg-black/75 flex items-center justify-center p-6"
+    >
       <div
         style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-strong)' }}
         className="border rounded-[12px] max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
@@ -144,6 +156,11 @@ export const HtmlImporterModal: React.FC<HtmlImporterModalProps> = ({
                   <span>Parse Breakdown ({totalBlocks} Editable Element{totalBlocks === 1 ? '' : 's'})</span>
                 </span>
                 <div className="flex flex-wrap gap-1 text-[9.5px] font-mono">
+                  {preview.roundTripMeta && (
+                    <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-500 border border-emerald-500/40 font-bold">
+                      1:1 Lossless Round-Trip
+                    </span>
+                  )}
                   {preview.breakdown.rows > 0 && (
                     <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
                       {preview.breakdown.rows} Rows
@@ -257,6 +274,7 @@ export const HtmlImporterModal: React.FC<HtmlImporterModalProps> = ({
                   mode: importMode,
                   extractedSwatches: preview.extractedSwatches,
                   applySwatches,
+                  roundTripMeta: preview.roundTripMeta,
                 });
                 setRawHtml('');
                 onClose();

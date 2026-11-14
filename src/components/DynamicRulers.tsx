@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { CanvasGuide } from '../types/schema';
+import { CanvasGuide, UiTheme } from '../types/schema';
 
 interface DynamicRulerProps {
   orientation: 'horizontal' | 'vertical';
@@ -8,7 +8,7 @@ interface DynamicRulerProps {
   canvasExtentPx: number;
   zoom: number;
   cursorCanvasPos: number | null;
-  uiTheme: 'carbon' | 'paper';
+  uiTheme: UiTheme;
   guides?: CanvasGuide[];
   onResetPan?: () => void;
   onStartCreateGuide?: (e: React.PointerEvent) => void;
@@ -51,9 +51,16 @@ export const DynamicRulerCanvas: React.FC<DynamicRulerProps> = ({
     ctx.scale(dpr, dpr);
 
     const styles = getComputedStyle(document.documentElement);
-    const rulerBg = styles.getPropertyValue('--ruler-bg').trim() || (uiTheme === 'paper' ? '#F3EFE6' : '#1E1D1B');
-    const tickColor = styles.getPropertyValue('--ruler-tick').trim() || (uiTheme === 'paper' ? '#A89F91' : '#57534E');
-    const textColor = styles.getPropertyValue('--text-muted').trim() || (uiTheme === 'paper' ? '#6B655D' : '#A8A29E');
+    const isLight = uiTheme !== 'carbon';
+    const rulerBg =
+      styles.getPropertyValue('--ruler-bg').trim() ||
+      (uiTheme === 'cute' ? '#F3E8FF' : isLight ? '#F3EFE6' : '#1E1D1B');
+    const tickColor =
+      styles.getPropertyValue('--ruler-tick').trim() ||
+      (uiTheme === 'cute' ? '#C084FC' : isLight ? '#A89F91' : '#57534E');
+    const textColor =
+      styles.getPropertyValue('--text-muted').trim() ||
+      (uiTheme === 'cute' ? '#8B6F9C' : isLight ? '#6B655D' : '#A8A29E');
     const accentColor = styles.getPropertyValue('--accent').trim() || '#C86D51';
 
     // Fill background
@@ -66,7 +73,12 @@ export const DynamicRulerCanvas: React.FC<DynamicRulerProps> = ({
     const clippedStart = Math.max(0, spanStart);
     const clippedEnd = Math.min(lengthPx, spanEnd);
     if (clippedEnd > clippedStart) {
-      ctx.fillStyle = uiTheme === 'paper' ? 'rgba(200, 109, 81, 0.08)' : 'rgba(224, 122, 95, 0.11)';
+      ctx.fillStyle =
+        uiTheme === 'cute'
+          ? 'rgba(236, 72, 153, 0.11)'
+          : isLight
+          ? 'rgba(200, 109, 81, 0.08)'
+          : 'rgba(224, 122, 95, 0.11)';
       if (orientation === 'horizontal') {
         ctx.fillRect(clippedStart, 0, clippedEnd - clippedStart, h);
       } else {

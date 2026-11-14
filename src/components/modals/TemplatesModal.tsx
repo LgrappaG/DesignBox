@@ -27,7 +27,12 @@ export const TemplatesModal: React.FC<TemplatesModalProps> = ({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-6">
+    <div
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-[200] bg-black/75 flex items-center justify-center p-6"
+    >
       <div
         style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-strong)' }}
         className="border rounded-[12px] max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"

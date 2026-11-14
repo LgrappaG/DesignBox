@@ -7,13 +7,13 @@ import { TopBar } from './components/TopBar';
 import { HtmlImporterModal } from './components/modals/HtmlImporterModal';
 import { LivePreviewModal } from './components/modals/LivePreviewModal';
 import { ObjectForgeModal } from './components/modals/ObjectForgeModal';
-import { SettingsModal } from './components/modals/SettingsModal';
-import { ShortcutsModal } from './components/modals/ShortcutsModal';
+import { SettingsModal, SettingsModalTab } from './components/modals/SettingsModal';
 import { TemplatesModal } from './components/modals/TemplatesModal';
 import { AssetPreset } from './data/assets';
 import { isPureContainerType, PURE_PRIMITIVE_DEFAULTS } from './data/purePrimitives';
+import { SearchableCatalogItem } from './data/searchCatalog';
 import { DEFAULT_CUSTOM_BLUEPRINTS, TemplatePreset } from './data/templates';
-import { isToyhouseFreePlatform } from './engine/f2uShield';
+import { getElementF2UShieldReport, isToyhouseFreePlatform } from './engine/f2uShield';
 import {
   generatePlatformExport,
   renderInnerElementHTML,
@@ -40,6 +40,7 @@ import {
   ProjectFile,
   SplitModifier,
   TargetPlatform,
+  UiTheme,
 } from './types/schema';
 import { getInnerBoxGeometry } from './utils/canvasGeometry';
 import { buildUniformBorderPatch, getDisplayBorderColor } from './utils/borderHelpers';
@@ -50,6 +51,17 @@ import {
   buildElementFromFaIcon,
 } from './utils/elementFactory';
 import { processLocalImageFile } from './utils/imageUpload';
+import {
+  buildCuteThemeCssVars,
+  extractDesignImageUrls,
+  KeybindingMap,
+  loadKeybindings,
+  loadStudioPreferences,
+  matchesShortcut,
+  saveKeybindings,
+  saveStudioPreferences,
+  StudioPreferences,
+} from './utils/studioSettings';
 import { isTauriRuntime } from './utils/tauriDesktop';
 
 const DEFAULT_SWATCHES = [
@@ -75,6 +87,18 @@ function readNumericPref(key: string, fallbackFromProject: number | undefined, f
 
 export default function App() {
   const [initialBootstrap] = useState(() => loadInitialProjectFromStorage());
+  const [studioPrefs, setStudioPrefs] = useState<StudioPreferences>(() => loadStudioPreferences());
+  const [keybindings, setKeybindings] = useState<KeybindingMap>(() => loadKeybindings());
+
+  const handleChangeStudioPrefs = useCallback((next: StudioPreferences) => {
+    setStudioPrefs(next);
+    saveStudioPreferences(next);
+  }, []);
+
+  const handleChangeKeybindings = useCallback((next: KeybindingMap) => {
+    setKeybindings(next);
+    saveKeybindings(next);
+  }, []);
 
   const [customBlueprints, setCustomBlueprints] = useState<CustomWidgetBlueprint[]>(() => {
     try {
@@ -86,29 +110,33 @@ export default function App() {
     return initialBootstrap.customBlueprints || DEFAULT_CUSTOM_BLUEPRINTS;
   });
 
-  const [uiTheme, setUiTheme] = useState<'carbon' | 'paper'>(
-    () => (localStorage.getItem('dbx_ui_theme_v2') as 'carbon' | 'paper') || 'paper'
-  );
+  const [uiTheme, setUiTheme] = useState<UiTheme>(() => {
+    const saved = localStorage.getItem('dbx_ui_theme_v2');
+    return saved === 'carbon' || saved === 'paper' || saved === 'cute' ? saved : 'paper';
+  });
   const [platform, setPlatform] = useState<TargetPlatform>(
     initialBootstrap.platform || 'toyhouse_free'
   );
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(
-    initialBootstrap.layoutMode || 'hybrid'
+    initialBootstrap.layoutMode || studioPrefs.defaultLayoutMode || 'freeform'
   );
   const [canvasWidth, setCanvasWidth] = useState<number>(() =>
-    readNumericPref('dbx_canvas_width', initialBootstrap.canvasWidth, 760)
+    readNumericPref('dbx_canvas_width', initialBootstrap.canvasWidth, studioPrefs.defaultCanvasWidth || 760)
   );
   const [canvasHeight, setCanvasHeight] = useState<number>(() =>
-    readNumericPref('dbx_canvas_height', initialBootstrap.canvasHeight, 540)
+    readNumericPref('dbx_canvas_height', initialBootstrap.canvasHeight, studioPrefs.defaultCanvasHeight || 540)
   );
   const [canvasBg, setCanvasBg] = useState<string>(
-    () => localStorage.getItem('dbx_canvas_bg') || initialBootstrap.canvasBg || '#FAF8F5'
+    () =>
+      localStorage.getItem('dbx_canvas_bg') ||
+      initialBootstrap.canvasBg ||
+      (studioPrefs.defaultTransparentCanvas ? 'transparent' : '#FAF8F5')
   );
   const [canvasPattern, setCanvasPattern] = useState<BgPattern>(
     () =>
       (localStorage.getItem('dbx_canvas_pattern') as BgPattern | null) ||
       initialBootstrap.canvasPattern ||
-      'dots'
+      'none'
   );
   const [swatches, setSwatches] = useState<string[]>(() => {
     try {
@@ -130,6 +158,8 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [clipboardEl, setClipboardEl] = useState<DesignElement | null>(null);
+  const [copiedStyle, setCopiedStyle] = useState<Partial<DesignElement> | null>(null);
+  const [spotlightOpen, setSpotlightOpen] = useState<boolean>(false);
   const [inlineEditId, setInlineEditId] = useState<string | null>(null);
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [editingContainerId, setEditingContainerId] = useState<string | null>(null);
@@ -152,7 +182,7 @@ export default function App() {
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('style');
   const [canvasTool, setCanvasTool] = useState<CanvasDrawTool>('select');
   const [magneticSnap, setMagneticSnap] = useState<boolean>(true);
-  const [autoNestDrop, setAutoNestDrop] = useState<boolean>(true);
+  const [autoNestDrop, setAutoNestDrop] = useState<boolean>(false);
   const [showHybridOverlay, setShowHybridOverlay] = useState<boolean>(true);
   const [showHtmlImporterModal, setShowHtmlImporterModal] = useState<boolean>(false);
 
@@ -243,8 +273,8 @@ export default function App() {
   const [previewViewport, setPreviewViewport] = useState<PreviewViewport>('th_col');
   const [previewToyhouseShell, setPreviewToyhouseShell] = useState<boolean>(true);
   const [showTemplatesModal, setShowTemplatesModal] = useState<boolean>(false);
-  const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsModalTab>('general');
   const [showObjectForgeModal, setShowObjectForgeModal] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
   const [imgbbApiKey, setImgbbApiKey] = useState<string>(
@@ -345,6 +375,16 @@ export default function App() {
     onSelectAfterLoad: handleSelectAfterLoad,
   });
 
+  // Auto-snapshot interval when enabled in Studio Preferences
+  useEffect(() => {
+    const secs = studioPrefs.autoSnapshotIntervalSec;
+    if (!secs || secs <= 0) return;
+    const timer = window.setInterval(() => {
+      void createManualSnapshot();
+    }, secs * 1000);
+    return () => window.clearInterval(timer);
+  }, [studioPrefs.autoSnapshotIntervalSec, createManualSnapshot]);
+
   // Persist Studio UI Preferences
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', uiTheme);
@@ -433,6 +473,14 @@ export default function App() {
     [elements, layoutMode, canvasWidth]
   );
 
+  const shieldedElementCount = useMemo(() => {
+    if (!isToyhouseFreePlatform(platform)) return 0;
+    return elements.reduce(
+      (count, el) => count + (getElementF2UShieldReport(el).isShielded ? 1 : 0),
+      0
+    );
+  }, [elements, platform]);
+
   const exportResult = useMemo(
     () =>
       generatePlatformExport(
@@ -448,6 +496,7 @@ export default function App() {
   );
 
   const previewSrcDoc = useMemo(() => {
+    const cute = studioPrefs.cuteThemeColors;
     const themeMap: Record<
       PreviewSurface,
       {
@@ -460,6 +509,8 @@ export default function App() {
         cardBg: string;
         muted: string;
         link: string;
+        bannerBg: string;
+        bannerText: string;
       }
     > = {
       th_dark: {
@@ -467,22 +518,26 @@ export default function App() {
         text: '#DCD9E6',
         navBg: '#23202D',
         navText: '#EDEAF5',
-        sideBg: '#1D1A25',
-        sideBorder: '#2F2B3D',
-        cardBg: '#221F2B',
-        muted: '#9691A8',
-        link: '#74A9F7',
+        sideBg: '#272333',
+        sideBorder: '#363147',
+        cardBg: '#2B2537',
+        muted: '#9D97B0',
+        link: '#6CB8C0',
+        bannerBg: '#4E8C93',
+        bannerText: '#FFFFFF',
       },
       th_light: {
         bg: '#F4F5F7',
         text: '#212529',
-        navBg: '#343A40',
-        navText: '#F8F9FA',
-        sideBg: '#FFFFFF',
+        navBg: '#FFFFFF',
+        navText: '#212529',
+        sideBg: '#F8F9FA',
         sideBorder: '#DEE2E6',
-        cardBg: '#F8F9FA',
+        cardBg: '#FFFFFF',
         muted: '#6C757D',
         link: '#007BFF',
+        bannerBg: '#007BFF',
+        bannerText: '#FFFFFF',
       },
       th_pink: {
         bg: '#FDF3F7',
@@ -494,6 +549,8 @@ export default function App() {
         cardBg: '#FFF5F9',
         muted: '#946B7D',
         link: '#C94D7C',
+        bannerBg: '#D87A9D',
+        bannerText: '#FFFFFF',
       },
       th_teal: {
         bg: '#EDF6F7',
@@ -505,6 +562,21 @@ export default function App() {
         cardBg: '#F1F9FA',
         muted: '#5D8085',
         link: '#247E88',
+        bannerBg: '#3D8891',
+        bannerText: '#FFFFFF',
+      },
+      th_cute: {
+        bg: cute.bgApp,
+        text: cute.textMain,
+        navBg: cute.accentSecondary,
+        navText: '#FFFFFF',
+        sideBg: cute.bgPanel,
+        sideBorder: cute.borderMain,
+        cardBg: cute.bgPanelAlt,
+        muted: cute.textMuted,
+        link: cute.accentPrimary,
+        bannerBg: cute.accentPrimary,
+        bannerText: '#FFFFFF',
       },
       paper: {
         bg: '#E5E0D5',
@@ -516,15 +588,59 @@ export default function App() {
         cardBg: '#F7F5F0',
         muted: '#78736A',
         link: '#C86D51',
+        bannerBg: '#C86D51',
+        bannerText: '#FFFFFF',
       },
     };
     const palette = themeMap[previewSurface] || themeMap.th_dark;
     const isTh = platform.startsWith('toyhouse');
     const useShell = isTh && previewToyhouseShell;
-    const safeTitle = (projectName || 'Character Profile')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
+    const escapeHtmlText = (v: string) =>
+      v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const escapeHtmlAttr = (v: string) =>
+      escapeHtmlText(v).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    const safeTitle = escapeHtmlText(projectName || 'Character Profile');
+    const designImages = extractDesignImageUrls(elements);
+    const firstDesignImage = designImages[0];
+    const createdDateStr = new Date().toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+
+    const dbxIconBadge = (sizePx: number, fontSizePx: number, radiusPx = 4) => `
+      <span class="th-dbx-avatar" style="width:${sizePx}px;height:${sizePx}px;border-radius:${radiusPx}px;font-size:${fontSizePx}px;">DBX</span>
+    `;
+
+    const primaryCharAvatarHtml = firstDesignImage
+      ? `<img src="${escapeHtmlAttr(firstDesignImage)}" alt="${safeTitle}" class="th-char-avatar-img" />`
+      : dbxIconBadge(64, 15, 6);
+
+    const sidebarCharThumbHtml = firstDesignImage
+      ? `<img src="${escapeHtmlAttr(firstDesignImage)}" alt="${safeTitle}" class="th-side-mini-img" />`
+      : dbxIconBadge(26, 8, 4);
+
+    const recentImagesHtml =
+      designImages.length > 0
+        ? designImages
+            .slice(0, 6)
+            .map(
+              (imgUrl, idx) => `
+          <div class="th-recent-thumb">
+            <img src="${escapeHtmlAttr(imgUrl)}" alt="Design Image ${idx + 1}" />
+            <span class="th-thumb-edit"><i class="fa-solid fa-pencil"></i></span>
+          </div>`
+            )
+            .join('')
+        : Array.from({ length: 4 }, (_, idx) => `
+          <div class="th-recent-thumb placeholder">
+            <div class="th-thumb-placeholder-inner">
+              <i class="fa-regular fa-image"></i>
+              <span>Image ${idx + 1}</span>
+            </div>
+            <span class="th-thumb-edit"><i class="fa-solid fa-pencil"></i></span>
+          </div>`).join('');
+
     const bsFallbackCss = isTh
       ? `
       .container { width: 100%; padding-right: 15px; padding-left: 15px; margin-right: auto; margin-left: auto; }
@@ -558,54 +674,292 @@ export default function App() {
 
     const shellStyles = useShell
       ? `
+      .th-dbx-avatar {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, ${palette.bannerBg}, ${palette.link});
+        color: #fff;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        flex-shrink: 0;
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.22);
+      }
       .th-sim-nav {
-        height: 44px;
+        height: 42px;
         background-color: ${palette.navBg};
         color: ${palette.navText};
-        padding: 0 18px;
+        padding: 0 16px;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        font-size: 13px;
-        border-bottom: 1px solid rgba(0,0,0,0.2);
+        font-size: 12.5px;
+        border-bottom: 1px solid ${palette.sideBorder};
+      }
+      .th-nav-left, .th-nav-right {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .th-nav-brand {
+        font-weight: 700;
+        font-size: 14px;
+        letter-spacing: 0.04em;
+      }
+      .th-nav-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        opacity: 0.84;
+        font-size: 12px;
+      }
+      .th-nav-user {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-weight: 600;
+        font-size: 12px;
       }
       .th-sim-layout {
         display: flex;
-        align-items: flex-start;
-        min-height: calc(100vh - 44px);
+        align-items: stretch;
+        min-height: calc(100vh - 42px);
       }
       .th-sim-sidebar {
-        width: 205px;
+        width: 215px;
         flex-shrink: 0;
         background-color: ${palette.sideBg};
         border-right: 1px solid ${palette.sideBorder};
-        min-height: calc(100vh - 44px);
-        padding: 14px 12px;
-        font-size: 12.5px;
+        font-size: 12px;
       }
-      .th-sim-sidebar-item {
+      .th-side-banner {
+        background-color: ${palette.bannerBg};
+        color: ${palette.bannerText};
+        padding: 7px 12px;
+        font-weight: 600;
+        font-size: 12.5px;
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 6px 10px;
-        border-radius: 5px;
-        margin-bottom: 3px;
-        color: ${palette.muted};
       }
-      .th-sim-sidebar-item.active {
-        background-color: ${palette.cardBg};
+      .th-side-owner-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        color: ${palette.link};
+        font-weight: 600;
+      }
+      .th-side-char-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background-color: rgba(255,255,255,0.04);
+        border-left: 3px solid ${palette.bannerBg};
         color: ${palette.text};
         font-weight: 600;
+      }
+      .th-side-mini-img {
+        width: 26px;
+        height: 26px;
+        border-radius: 4px;
+        object-fit: cover;
+        flex-shrink: 0;
         border: 1px solid ${palette.sideBorder};
+      }
+      .th-side-group {
+        border-top: 1px solid ${palette.sideBorder};
+        padding: 5px 0;
+      }
+      .th-side-link {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 5px 12px;
+        color: ${palette.link};
+        font-size: 12px;
+      }
+      .th-side-link-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .th-side-link-left i {
+        width: 14px;
+        text-align: center;
+        opacity: 0.85;
+      }
+      .th-side-count {
+        background-color: ${palette.cardBg};
+        color: ${palette.muted};
+        border: 1px solid ${palette.sideBorder};
+        border-radius: 4px;
+        padding: 0 5px;
+        font-size: 10.5px;
+        font-weight: 600;
+      }
+      .th-side-control-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 12px;
+        color: ${palette.link};
+        font-size: 11.5px;
+        border-bottom: 1px solid ${palette.sideBorder};
       }
       .th-sim-main {
         flex: 1;
         min-width: 0;
-        padding: 18px 20px;
+        padding: 14px 22px 24px;
+      }
+      .th-char-header {
+        background-color: ${palette.cardBg};
+        border: 1px solid ${palette.sideBorder};
+        border-radius: 4px;
+        padding: 12px 16px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+      .th-char-identity {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-width: 0;
+      }
+      .th-char-avatar-img {
+        width: 64px;
+        height: 64px;
+        border-radius: 5px;
+        object-fit: cover;
+        border: 1px solid ${palette.sideBorder};
+        flex-shrink: 0;
+      }
+      .th-char-title {
+        font-size: 21px;
+        font-weight: 500;
+        margin: 0 0 2px;
+        color: ${palette.text};
+        line-height: 1.2;
+      }
+      .th-char-user {
+        font-size: 12px;
+        color: ${palette.link};
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .th-char-meta {
+        display: grid;
+        grid-template-columns: 78px auto;
+        gap: 4px 20px;
+        font-size: 11.5px;
+        padding-left: 16px;
+        border-left: 1px solid ${palette.sideBorder};
+      }
+      .th-meta-label {
+        color: ${palette.muted};
+        font-weight: 600;
+      }
+      .th-meta-value {
+        color: ${palette.text};
+      }
+      .th-meta-link {
+        color: ${palette.link};
+      }
+      .th-section-heading {
+        font-size: 17px;
+        font-weight: 400;
+        color: ${palette.text};
+        border-bottom: 1px solid ${palette.sideBorder};
+        padding-bottom: 6px;
+        margin: 0 0 14px;
+      }
+      .th-recent-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid ${palette.sideBorder};
+        padding-bottom: 6px;
+        margin: 26px 0 12px;
+      }
+      .th-recent-header h2 {
+        font-size: 17px;
+        font-weight: 400;
+        margin: 0;
+        color: ${palette.text};
+      }
+      .th-view-more {
+        background-color: ${palette.cardBg};
+        border: 1px solid ${palette.sideBorder};
+        color: ${palette.text};
+        font-size: 11px;
+        padding: 4px 10px;
+        border-radius: 4px;
+      }
+      .th-recent-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+        gap: 10px;
+      }
+      .th-recent-thumb {
+        position: relative;
+        aspect-ratio: 1 / 1;
+        background-color: ${palette.cardBg};
+        border: 1px solid ${palette.sideBorder};
+        border-radius: 3px;
+        padding: 5px;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .th-recent-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 2px;
+        display: block;
+      }
+      .th-recent-thumb.placeholder {
+        border-style: dashed;
+      }
+      .th-thumb-placeholder-inner {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        color: ${palette.muted};
+        font-size: 11px;
+        opacity: 0.7;
+      }
+      .th-thumb-placeholder-inner i {
+        font-size: 20px;
+      }
+      .th-thumb-edit {
+        position: absolute;
+        right: 6px;
+        bottom: 6px;
+        width: 22px;
+        height: 22px;
+        border-radius: 3px;
+        background-color: ${palette.sideBg};
+        border: 1px solid ${palette.sideBorder};
+        color: ${palette.muted};
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
       }
       @media (max-width: 767px) {
         .th-sim-sidebar { display: none; }
         .th-sim-main { padding: 10px; }
+        .th-char-meta { border-left: none; padding-left: 0; }
       }
       `
       : '';
@@ -613,37 +967,99 @@ export default function App() {
     const bodyContent = useShell
       ? `
     <header class="th-sim-nav">
-      <div style="display: flex; align-items: center; gap: 10px; font-weight: 700;">
-        <i class="fa-solid fa-home"></i>
-        <span>TOYHOU.SE</span>
-        <span style="opacity: 0.45; font-weight: 400;">/</span>
-        <span style="font-weight: 500; opacity: 0.9;">Characters</span>
-        <span style="opacity: 0.45; font-weight: 400;">/</span>
-        <span style="color: ${palette.link}; font-weight: 600;">${safeTitle}</span>
+      <div class="th-nav-left">
+        <span class="th-nav-brand">TOYHOU.SE</span>
+        <span class="th-nav-link"><i class="fa-solid fa-home"></i><span>Profile</span></span>
+        <span class="th-nav-link"><i class="fa-solid fa-comments"></i><span>Forums</span></span>
+        <span class="th-nav-link"><i class="fa-solid fa-search"></i><span>Browse</span><i class="fa-solid fa-caret-down" style="font-size:9px;"></i></span>
+        <span class="th-nav-link"><i class="fa-solid fa-plus"></i><span>Submit</span><i class="fa-solid fa-caret-down" style="font-size:9px;"></i></span>
       </div>
-      <div style="font-size: 11px; opacity: 0.78;">
-        ${platform === 'toyhouse_free' || platform === 'toyhouse_oc' ? 'F2U Sanitizer Mode' : 'Toyhouse Premium Mode'}
+      <div class="th-nav-right">
+        <span class="th-nav-link" style="opacity:0.7;"><i class="fa-solid fa-envelope"></i></span>
+        <span class="th-nav-user">
+          ${dbxIconBadge(22, 8, 4)}
+          <span>user</span>
+          <i class="fa-solid fa-caret-down" style="font-size:9px;opacity:0.7;"></i>
+        </span>
       </div>
     </header>
     <div class="th-sim-layout">
       <aside class="th-sim-sidebar">
-        <div style="font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: ${palette.muted}; margin-bottom: 10px;">
-          Character Menu
+        <div class="th-side-banner">
+          <i class="fa-solid fa-heart"></i>
+          <span>Character</span>
         </div>
-        <div class="th-sim-sidebar-item active"><i class="fa-regular fa-id-card"></i><span>Profile</span></div>
-        <div class="th-sim-sidebar-item"><i class="fa-regular fa-images"></i><span>Gallery</span></div>
-        <div class="th-sim-sidebar-item"><i class="fa-solid fa-book-open"></i><span>Literature</span></div>
-        <div class="th-sim-sidebar-item"><i class="fa-solid fa-link"></i><span>Links</span></div>
-        <div class="th-sim-sidebar-item"><i class="fa-regular fa-comments"></i><span>Comments</span></div>
-        <hr style="border-color: ${palette.sideBorder}; margin: 12px 0;" />
-        <div style="font-size: 11px; color: ${palette.muted}; line-height: 1.4;">
-          Simulated TH Profile Container<br/>
-          Theme: ${previewSurface.replace('th_', 'TH ')}
+        <div class="th-side-owner-row">
+          ${dbxIconBadge(26, 8, 4)}
+          <span class="text-truncate">user</span>
         </div>
+        <div class="th-side-banner">
+          <i class="fa-solid fa-folder"></i>
+          <span>Character</span>
+        </div>
+        <div class="th-side-char-row">
+          ${sidebarCharThumbHtml}
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${safeTitle}</span>
+        </div>
+        <div class="th-side-group">
+          <div class="th-side-link">
+            <span class="th-side-link-left"><i class="fa-regular fa-images"></i><span>Gallery</span></span>
+            <span class="th-side-count">${designImages.length}</span>
+          </div>
+          <div class="th-side-link"><span class="th-side-link-left"><i class="fa-solid fa-book"></i><span>Library</span></span></div>
+          <div class="th-side-link"><span class="th-side-link-left"><i class="fa-solid fa-globe"></i><span>Worlds</span></span></div>
+          <div class="th-side-link"><span class="th-side-link-left"><i class="fa-solid fa-link"></i><span>Links</span></span></div>
+        </div>
+        <div class="th-side-group">
+          <div class="th-side-link"><span class="th-side-link-left"><i class="fa-regular fa-comments"></i><span>Comments</span></span></div>
+          <div class="th-side-link">
+            <span class="th-side-link-left"><i class="fa-regular fa-star"></i><span>Favorite</span></span>
+            <span class="th-side-count">1</span>
+          </div>
+          <div class="th-side-link"><span class="th-side-link-left"><i class="fa-solid fa-certificate"></i><span>Ownership</span></span></div>
+        </div>
+        <div class="th-side-group">
+          <div class="th-side-link"><span class="th-side-link-left"><i class="fa-solid fa-triangle-exclamation"></i><span>Report</span></span></div>
+          <div class="th-side-link"><span class="th-side-link-left"><i class="fa-solid fa-ban"></i><span>Block</span></span></div>
+        </div>
+        <div class="th-side-banner" style="margin-top:4px;">
+          <i class="fa-solid fa-wrench"></i>
+          <span>Control Panel</span>
+        </div>
+        <div class="th-side-control-item"><span>Manage Character</span><i class="fa-solid fa-caret-right"></i></div>
+        <div class="th-side-control-item"><span>Manage Images</span><i class="fa-solid fa-caret-right"></i></div>
+        <div class="th-side-control-item"><span>Manage Literatures</span><i class="fa-solid fa-caret-right"></i></div>
       </aside>
       <main class="th-sim-main">
+        <div class="th-char-header">
+          <div class="th-char-identity">
+            ${primaryCharAvatarHtml}
+            <div style="min-width:0;">
+              <h1 class="th-char-title">${safeTitle}</h1>
+              <div class="th-char-user"><i class="fa-solid fa-user"></i><span>user</span></div>
+            </div>
+          </div>
+          <div class="th-char-meta">
+            <span class="th-meta-label">Created</span>
+            <span class="th-meta-value">${createdDateStr}</span>
+            <span class="th-meta-label">Creator</span>
+            <span class="th-meta-link"><i class="fa-solid fa-user" style="margin-right:4px;"></i>user</span>
+            <span class="th-meta-label">Favorites</span>
+            <span class="th-meta-link">1</span>
+          </div>
+        </div>
+
+        <h2 class="th-section-heading">Profile</h2>
         <div class="user-content mx-auto" style="max-width: ${Math.max(canvasWidth + 32, 920)}px;">
           ${exportResult.html}
+        </div>
+
+        <div class="th-recent-header">
+          <h2>Recent Images</h2>
+          <span class="th-view-more">View More</span>
+        </div>
+        <div class="th-recent-grid">
+          ${recentImagesHtml}
         </div>
       </main>
     </div>`
@@ -710,10 +1126,24 @@ export default function App() {
           }
         }
       });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+          window.parent.postMessage({ type: 'DBX_ESCAPE_KEY' }, '*');
+        }
+      });
     </script>
   </body>
 </html>`;
-  }, [canvasWidth, exportResult.html, platform, previewSurface, previewToyhouseShell, projectName]);
+  }, [
+    canvasWidth,
+    elements,
+    exportResult.html,
+    platform,
+    previewSurface,
+    previewToyhouseShell,
+    projectName,
+    studioPrefs.cuteThemeColors,
+  ]);
 
   // Viewport & Canvas Pointer Hooks
   const {
@@ -823,7 +1253,19 @@ export default function App() {
     setSelectedIds([]);
     setInlineEditId(null);
     setEditingContainerId(null);
-    setCanvasBg(uiTheme === 'paper' ? '#FAF8F5' : '#161514');
+    setLayoutMode(studioPrefs.defaultLayoutMode);
+    setCanvasWidth(studioPrefs.defaultCanvasWidth);
+    setCanvasHeight(studioPrefs.defaultCanvasHeight);
+    setCanvasBg(
+      studioPrefs.defaultTransparentCanvas
+        ? 'transparent'
+        : uiTheme === 'cute'
+        ? studioPrefs.cuteThemeColors.bgPanel
+        : uiTheme === 'paper'
+        ? '#FAF8F5'
+        : '#161514'
+    );
+    setCanvasPattern('none');
     markSavedClean('Untitled Draft');
     setShowTemplatesModal(false);
   };
@@ -845,6 +1287,121 @@ export default function App() {
     },
     [commitWithUpdater, selectedId, selectedIds]
   );
+
+  const updateElementById = useCallback(
+    (id: string, patch: Partial<DesignElement>) => {
+      commitWithUpdater((prev) => prev.map((el) => (el.id === id ? { ...el, ...patch } : el)));
+    },
+    [commitWithUpdater]
+  );
+
+  const rotateSelected90 = useCallback(() => {
+    const targetIds = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
+    if (targetIds.length === 0) return;
+    commitWithUpdater((prev) =>
+      prev.map((el) =>
+        targetIds.includes(el.id) && !el.locked
+          ? { ...el, rotation: ((el.rotation || 0) + 90) % 360 }
+          : el
+      )
+    );
+  }, [commitWithUpdater, selectedId, selectedIds]);
+
+  const flipSelected = useCallback(
+    (axis: 'h' | 'v') => {
+      const targetIds = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
+      if (targetIds.length === 0) return;
+      commitWithUpdater((prev) =>
+        prev.map((el) => {
+          if (!targetIds.includes(el.id) || el.locked) return el;
+          return axis === 'h' ? { ...el, flipH: !el.flipH } : { ...el, flipV: !el.flipV };
+        })
+      );
+    },
+    [commitWithUpdater, selectedId, selectedIds]
+  );
+
+  const copySelectedStyle = useCallback(() => {
+    if (!selectedElement) return;
+    setCopiedStyle({
+      bgColor: selectedElement.bgColor,
+      bgGradientTo: selectedElement.bgGradientTo,
+      bgGradientType: selectedElement.bgGradientType,
+      bgGradientAngle: selectedElement.bgGradientAngle,
+      bgGradientMid: selectedElement.bgGradientMid,
+      bgPattern: selectedElement.bgPattern,
+      textColor: selectedElement.textColor,
+      borderColor: selectedElement.borderColor,
+      borderWidth: selectedElement.borderWidth,
+      borderStyle: selectedElement.borderStyle,
+      borderRadius: selectedElement.borderRadius,
+      bordersLinked: selectedElement.bordersLinked,
+      cornersLinked: selectedElement.cornersLinked,
+      radiusTL: selectedElement.radiusTL,
+      radiusTR: selectedElement.radiusTR,
+      radiusBR: selectedElement.radiusBR,
+      radiusBL: selectedElement.radiusBL,
+      opacity: selectedElement.opacity,
+      shadow: selectedElement.shadow,
+      glassBlur: selectedElement.glassBlur,
+      innerGlow: selectedElement.innerGlow,
+      fontFamily: selectedElement.fontFamily,
+      googleFont: selectedElement.googleFont,
+      fontSize: selectedElement.fontSize,
+      fontWeight: selectedElement.fontWeight,
+      textAlign: selectedElement.textAlign,
+      lineHeight: selectedElement.lineHeight,
+      letterSpacing: selectedElement.letterSpacing,
+      boxClipShape: selectedElement.boxClipShape,
+      shapeCutPx: selectedElement.shapeCutPx,
+    });
+  }, [selectedElement]);
+
+  const pasteStyleToSelected = useCallback(() => {
+    if (!copiedStyle) return;
+    updateSelected(copiedStyle);
+  }, [copiedStyle, updateSelected]);
+
+  const pasteClipboardElement = useCallback(
+    (atX?: number, atY?: number) => {
+      if (!clipboardEl) return;
+      const current = elementsRef.current;
+      const nextX =
+        atX !== undefined
+          ? Math.max(0, Math.min(canvasWidth - clipboardEl.width, Math.round(atX)))
+          : Math.min(canvasWidth - clipboardEl.width - 8, clipboardEl.x + 24);
+      const nextY =
+        atY !== undefined
+          ? Math.max(0, Math.min(canvasHeight - clipboardEl.height, Math.round(atY)))
+          : Math.min(canvasHeight - clipboardEl.height - 8, clipboardEl.y);
+      const pasted: DesignElement = {
+        ...clipboardEl,
+        id: `el-${Date.now().toString().slice(-4)}`,
+        label: `${clipboardEl.label} (Pasted)`,
+        x: Math.max(0, nextX),
+        y: Math.max(0, nextY),
+        order: current.length,
+      };
+      commitElements([...current, pasted]);
+      setClipboardEl(pasted);
+      setSelectedId(pasted.id);
+      setSelectedIds([pasted.id]);
+    },
+    [canvasHeight, canvasWidth, clipboardEl, commitElements, elementsRef]
+  );
+
+  const selectAllElements = useCallback(() => {
+    const targetList = editingContainerId
+      ? elementsRef.current.filter((e) => e.parentId === editingContainerId && !e.hidden)
+      : elementsRef.current.filter((e) => !e.parentId && !e.hidden);
+    const ids = targetList.map((e) => e.id);
+    setSelectedIds(ids);
+    setSelectedId(ids[0] || null);
+  }, [editingContainerId, elementsRef]);
+
+  const unlockAllElements = useCallback(() => {
+    commitWithUpdater((prev) => prev.map((e) => (e.locked ? { ...e, locked: false } : e)));
+  }, [commitWithUpdater]);
 
   const toggleLock = (id: string) => {
     commitWithUpdater((prev) =>
@@ -907,11 +1464,93 @@ export default function App() {
     setSelectedIds(next[0] ? [next[0].id] : []);
   }, [commitElements, elementsRef, selectedId, selectedIds]);
 
-  const adjustZIndex = (delta: number) => {
+  const adjustZIndex = useCallback(
+    (delta: number) => {
+      const targetIds = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
+      if (targetIds.length === 0) return;
+      commitWithUpdater((prev) =>
+        prev.map((el) =>
+          targetIds.includes(el.id)
+            ? { ...el, zIndex: Math.max(1, Math.min(99, (el.zIndex ?? 10) + delta)) }
+            : el
+        )
+      );
+    },
+    [commitWithUpdater, selectedId, selectedIds]
+  );
+
+  const bringToFront = useCallback(() => {
+    const targetIds = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
+    if (targetIds.length === 0) return;
+    commitWithUpdater((prev) => {
+      const maxZ = prev.reduce((m, e) => Math.max(m, e.zIndex ?? 10), 10);
+      return prev.map((el) =>
+        targetIds.includes(el.id) ? { ...el, zIndex: Math.min(99, maxZ + 1) } : el
+      );
+    });
+  }, [commitWithUpdater, selectedId, selectedIds]);
+
+  const sendToBack = useCallback(() => {
+    const targetIds = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
+    if (targetIds.length === 0) return;
+    commitWithUpdater((prev) => {
+      const minZ = prev.reduce((m, e) => Math.min(m, e.zIndex ?? 10), 10);
+      const nextZ = Math.max(1, minZ - 1);
+      return prev.map((el) => (targetIds.includes(el.id) ? { ...el, zIndex: nextZ } : el));
+    });
+  }, [commitWithUpdater, selectedId, selectedIds]);
+
+  const ungroupSelected = useCallback(() => {
     if (!selectedElement) return;
-    const currentZ = selectedElement.zIndex ?? 10;
-    updateSelected({ zIndex: Math.max(1, Math.min(99, currentZ + delta)) });
-  };
+    if (isPureContainerType(selectedElement.type)) {
+      const hasChildren = elementsRef.current.some((e) => e.parentId === selectedElement.id);
+      if (hasChildren) {
+        commitWithUpdater((prev) =>
+          prev.map((el) => {
+            if (el.parentId !== selectedElement.id) return el;
+            return {
+              ...el,
+              parentId: null,
+              parentPaneIndex: undefined,
+              x: Math.min(
+                canvasWidth - el.width,
+                Math.max(0, selectedElement.x + (el.childOffsetX ?? 20))
+              ),
+              y: Math.min(
+                canvasHeight - el.height,
+                Math.max(0, selectedElement.y + (el.childOffsetY ?? 20))
+              ),
+              childOffsetX: undefined,
+              childOffsetY: undefined,
+            };
+          })
+        );
+        return;
+      }
+    }
+    if (selectedElement.parentId) {
+      commitWithUpdater((prev) => {
+        const parent = prev.find((e) => e.id === selectedElement.parentId);
+        return prev.map((el) =>
+          el.id === selectedElement.id
+            ? {
+                ...el,
+                parentId: null,
+                parentPaneIndex: undefined,
+                x: parent
+                  ? Math.min(canvasWidth - el.width, Math.max(0, parent.x + (el.childOffsetX ?? 20)))
+                  : el.x,
+                y: parent
+                  ? Math.min(canvasHeight - el.height, Math.max(0, parent.y + (el.childOffsetY ?? 20)))
+                  : el.y,
+                childOffsetX: undefined,
+                childOffsetY: undefined,
+              }
+            : el
+        );
+      });
+    }
+  }, [canvasHeight, canvasWidth, commitWithUpdater, elementsRef, selectedElement]);
 
   const nestElementIntoContainer = (childId: string, parentId: string | null) => {
     if (!parentId) {
@@ -1045,7 +1684,7 @@ export default function App() {
     const maxY = Math.max(...selected.map((e) => e.y + e.height));
     const pad = 16;
     const boxId = `box-group-${Date.now().toString().slice(-4)}`;
-    const isLight = uiTheme === 'paper';
+    const isLight = uiTheme !== 'carbon';
     const newBox: DesignElement = {
       id: boxId,
       type: 'box',
@@ -1389,11 +2028,53 @@ export default function App() {
     }
   };
 
+  const addCatalogItemAtPosition = useCallback(
+    (item: SearchableCatalogItem, x: number, y: number) => {
+      const current = elementsRef.current;
+      let built: DesignElement | null = null;
+      if (item.kind === 'element' && item.elementType) {
+        built = buildDefaultElement(item.elementType, current, uiTheme, editingContainer);
+      } else if (item.kind === 'asset' && item.assetPreset) {
+        built = buildElementFromAssetPreset(item.assetPreset, current, uiTheme, editingContainer);
+      } else if (item.kind === 'fa_icon' && item.faIcon) {
+        built = buildElementFromFaIcon(
+          item.faIcon.cls,
+          item.faIcon.label,
+          'watermark',
+          current,
+          uiTheme,
+          editingContainer
+        );
+      } else if (item.kind === 'blueprint' && item.blueprint) {
+        built = buildBlueprintInstanceElement(item.blueprint, current, uiTheme);
+      }
+      if (!built) return;
+      const placed: DesignElement = built.parentId
+        ? built
+        : {
+            ...built,
+            x: Math.max(0, Math.min(canvasWidth - built.width, Math.round(x - built.width / 2))),
+            y: Math.max(0, Math.min(canvasHeight - built.height, Math.round(y - built.height / 2))),
+          };
+      commitElements([...current, placed]);
+      setSelectedId(placed.id);
+      setSelectedIds([placed.id]);
+    },
+    [canvasHeight, canvasWidth, commitElements, editingContainer, elementsRef, uiTheme]
+  );
+
   const handleImportHtmlElements = (params: {
     elements: DesignElement[];
     mode: 'replace' | 'append';
     extractedSwatches: string[];
     applySwatches: boolean;
+    roundTripMeta?: {
+      mode?: LayoutMode;
+      canvasWidth?: number;
+      canvasHeight?: number;
+      canvasBg?: string;
+      canvasPattern?: BgPattern;
+    };
   }) => {
     if (params.elements.length === 0) return;
     const nextElements =
@@ -1403,6 +2084,14 @@ export default function App() {
     setSelectedId(firstNewId);
     setSelectedIds(firstNewId ? [firstNewId] : []);
     setEditingContainerId(null);
+    if (params.mode === 'replace' && params.roundTripMeta) {
+      const meta = params.roundTripMeta;
+      if (meta.mode) setLayoutMode(meta.mode);
+      if (meta.canvasWidth) setCanvasWidth(meta.canvasWidth);
+      if (meta.canvasHeight) setCanvasHeight(meta.canvasHeight);
+      if (meta.canvasBg) setCanvasBg(meta.canvasBg);
+      if (meta.canvasPattern) setCanvasPattern(meta.canvasPattern);
+    }
     if (params.applySwatches && params.extractedSwatches.length > 0) {
       setSwatches((prev) =>
         params.mode === 'replace'
@@ -1537,18 +2226,90 @@ export default function App() {
     }
   };
 
-  // Global Keyboard Shortcuts (including Native Desktop Ctrl+S / Ctrl+Shift+S / Ctrl+O)
+  // Global Keyboard Shortcuts (Customizable Keybindings + Native Desktop Actions)
   useEffect(() => {
+    const handleEscapeHierarchy = (): boolean => {
+      if (inlineEditId) {
+        setInlineEditId(null);
+        return true;
+      }
+      if (spotlightOpen) {
+        setSpotlightOpen(false);
+        return true;
+      }
+      if (showLivePreviewModal) {
+        setShowLivePreviewModal(false);
+        return true;
+      }
+      if (showSettingsModal) {
+        setShowSettingsModal(false);
+        return true;
+      }
+      if (showObjectForgeModal) {
+        setShowObjectForgeModal(false);
+        return true;
+      }
+      if (showHtmlImporterModal) {
+        setShowHtmlImporterModal(false);
+        return true;
+      }
+      if (showTemplatesModal) {
+        setShowTemplatesModal(false);
+        return true;
+      }
+      if (canvasTool !== 'select') {
+        setCanvasTool('select');
+        setDrawMarquee(null);
+        return true;
+      }
+      if (editingContainerId) {
+        const parentId = editingContainerId;
+        setEditingContainerId(null);
+        setSelectedId(parentId);
+        setSelectedIds([parentId]);
+        return true;
+      }
+      if (selectedIds.length > 0 || selectedId !== null) {
+        setSelectedId(null);
+        setSelectedIds([]);
+        return true;
+      }
+      if (bottomDockOpen) {
+        setBottomDockOpen(false);
+        return true;
+      }
+      return false;
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
       const targetEl = e.target as HTMLElement | null;
       const tag = targetEl?.tagName;
-      if (
+      const isEditableFocused =
         tag === 'INPUT' ||
         tag === 'TEXTAREA' ||
         tag === 'SELECT' ||
-        targetEl?.isContentEditable ||
-        inlineEditId
-      ) {
+        Boolean(targetEl?.isContentEditable);
+
+      if (e.key === 'Escape') {
+        if (spotlightOpen) {
+          e.preventDefault();
+          setSpotlightOpen(false);
+          return;
+        }
+        if (isEditableFocused) {
+          // Option B: 1st Esc blurs focused input (and exits inline edit if active); 2nd Esc closes modal/layer
+          e.preventDefault();
+          targetEl?.blur();
+          if (inlineEditId) setInlineEditId(null);
+          return;
+        }
+        if (handleEscapeHierarchy()) {
+          e.preventDefault();
+        }
+        return;
+      }
+
+      if (isEditableFocused || inlineEditId || spotlightOpen) {
         return;
       }
 
@@ -1558,84 +2319,192 @@ export default function App() {
         return;
       }
 
-      const lower = e.key.toLowerCase();
-      if ((e.ctrlKey || e.metaKey) && lower === 's') {
+      // Spotlight Quick Search (`/` or `Ctrl+K` or custom keybinding)
+      if (
+        matchesShortcut(e, keybindings.spotlight_search) ||
+        (!e.ctrlKey && !e.metaKey && !e.altKey && e.key === '/') ||
+        ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k')
+      ) {
         e.preventDefault();
-        if (e.shiftKey) void handleSaveProjectAs();
-        else void handleSaveProject();
+        setSpotlightOpen(true);
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && lower === 'o') {
+
+      // Multi-modifier combos checked before single-modifier shortcuts
+      if (matchesShortcut(e, keybindings.save_project_as)) {
+        e.preventDefault();
+        void handleSaveProjectAs();
+        return;
+      }
+      if (matchesShortcut(e, keybindings.save_project)) {
+        e.preventDefault();
+        void handleSaveProject();
+        return;
+      }
+      if (matchesShortcut(e, keybindings.open_project)) {
         e.preventDefault();
         void handleOpenProject();
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+      if (matchesShortcut(e, keybindings.copy_style)) {
+        e.preventDefault();
+        copySelectedStyle();
+        return;
+      }
+      if (matchesShortcut(e, keybindings.paste_style)) {
+        e.preventDefault();
+        pasteStyleToSelected();
+        return;
+      }
+      if (matchesShortcut(e, keybindings.copy_html)) {
+        e.preventDefault();
+        handleCopyCode();
+        return;
+      }
+      if (matchesShortcut(e, keybindings.redo) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y')) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (matchesShortcut(e, keybindings.undo)) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (matchesShortcut(e, keybindings.duplicate)) {
+        e.preventDefault();
+        duplicateSelected();
+        return;
+      }
+      if (matchesShortcut(e, keybindings.copy)) {
+        if (selectedElement) setClipboardEl(selectedElement);
+        return;
+      }
+      if (matchesShortcut(e, keybindings.paste)) {
+        if (clipboardEl) {
+          e.preventDefault();
+          pasteClipboardElement();
+        }
+        return;
+      }
+      if (matchesShortcut(e, keybindings.select_all)) {
+        e.preventDefault();
+        selectAllElements();
+        return;
+      }
+      if (matchesShortcut(e, keybindings.ungroup)) {
+        e.preventDefault();
+        ungroupSelected();
+        return;
+      }
+      if (matchesShortcut(e, keybindings.group_box)) {
+        e.preventDefault();
+        groupSelectedIntoBox();
+        return;
+      }
+      if (matchesShortcut(e, keybindings.bring_front)) {
+        e.preventDefault();
+        bringToFront();
+        return;
+      }
+      if (matchesShortcut(e, keybindings.send_back)) {
+        e.preventDefault();
+        sendToBack();
+        return;
+      }
+      if (matchesShortcut(e, keybindings.bring_forward)) {
+        e.preventDefault();
+        adjustZIndex(1);
+        return;
+      }
+      if (matchesShortcut(e, keybindings.send_backward)) {
+        e.preventDefault();
+        adjustZIndex(-1);
+        return;
+      }
+      if (matchesShortcut(e, keybindings.zoom_reset)) {
         e.preventDefault();
         setZoom(1);
         setPanOffset({ x: 0, y: 0 });
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === '1') {
+      if (matchesShortcut(e, keybindings.zoom_fit)) {
         e.preventDefault();
         fitCanvasToView();
         return;
       }
-
-      if (e.key === 'Escape') {
-        if (canvasTool !== 'select') {
-          setCanvasTool('select');
-          setDrawMarquee(null);
-          return;
-        }
-        if (editingContainerId) {
-          const parentId = editingContainerId;
-          setEditingContainerId(null);
-          setSelectedId(parentId);
-          setSelectedIds([parentId]);
-          return;
-        }
-      }
-
-      if ((e.ctrlKey || e.metaKey) && lower === 'z') {
+      if (matchesShortcut(e, keybindings.zen_mode)) {
         e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
+        const shouldExpand = leftCollapsed && rightCollapsed;
+        setLeftCollapsed(!shouldExpand);
+        setRightCollapsed(!shouldExpand);
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && lower === 'y') {
+      if (matchesShortcut(e, keybindings.live_preview)) {
         e.preventDefault();
-        redo();
+        setShowLivePreviewModal((v) => !v);
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && lower === 'd') {
+      if (matchesShortcut(e, keybindings.toggle_snap)) {
         e.preventDefault();
-        duplicateSelected();
+        setMagneticSnap((s) => !s);
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && lower === 'c') {
-        if (selectedElement) setClipboardEl(selectedElement);
+      if (matchesShortcut(e, keybindings.lock_toggle) && selectedId) {
+        e.preventDefault();
+        toggleLock(selectedId);
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && lower === 'v') {
-        if (clipboardEl) {
-          e.preventDefault();
-          const current = elementsRef.current;
-          const pasted: DesignElement = {
-            ...clipboardEl,
-            id: `el-${Date.now().toString().slice(-4)}`,
-            label: `${clipboardEl.label} (Pasted)`,
-            x: Math.min(canvasWidth - clipboardEl.width - 8, clipboardEl.x + 24),
-            y: Math.min(canvasHeight - clipboardEl.height - 8, clipboardEl.y + 24),
-            order: current.length,
-          };
-          commitElements([...current, pasted]);
-          setSelectedId(pasted.id);
-          setSelectedIds([pasted.id]);
-        }
+      if (matchesShortcut(e, keybindings.hide_toggle) && selectedId) {
+        e.preventDefault();
+        toggleHide(selectedId);
         return;
       }
-      if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (matchesShortcut(e, keybindings.rotate_90)) {
+        e.preventDefault();
+        rotateSelected90();
+        return;
+      }
+      if (matchesShortcut(e, keybindings.flip_h)) {
+        e.preventDefault();
+        flipSelected('h');
+        return;
+      }
+      if (matchesShortcut(e, keybindings.flip_v)) {
+        e.preventDefault();
+        flipSelected('v');
+        return;
+      }
+      if (matchesShortcut(e, keybindings.tool_select)) {
+        e.preventDefault();
+        setCanvasTool('select');
+        return;
+      }
+      if (matchesShortcut(e, keybindings.tool_box)) {
+        e.preventDefault();
+        setCanvasTool('draw_box');
+        return;
+      }
+      if (matchesShortcut(e, keybindings.tool_line)) {
+        e.preventDefault();
+        setCanvasTool('draw_line');
+        return;
+      }
+      if (matchesShortcut(e, keybindings.tool_ring)) {
+        e.preventDefault();
+        setCanvasTool('draw_ring');
+        return;
+      }
+      if (matchesShortcut(e, keybindings.quick_add_text)) {
+        e.preventDefault();
+        addElement('pure_paragraph');
+        return;
+      }
+      if (
+        matchesShortcut(e, keybindings.delete) ||
+        e.key === 'Delete' ||
+        e.key === 'Backspace'
+      ) {
         e.preventDefault();
         deleteSelected();
         return;
@@ -1647,7 +2516,9 @@ export default function App() {
         ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)
       ) {
         e.preventDefault();
-        const step = e.shiftKey ? 8 : 1;
+        const step = e.shiftKey
+          ? studioPrefs.shiftNudgeStepPx || 8
+          : studioPrefs.nudgeStepPx || 1;
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
         const targetIds = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
@@ -1668,58 +2539,98 @@ export default function App() {
       if (e.code === 'Space') setIsSpacePressed(false);
     };
     const onBlur = () => setIsSpacePressed(false);
+    const onIframeMessage = (ev: MessageEvent) => {
+      if (
+        ev.data &&
+        typeof ev.data === 'object' &&
+        (ev.data as { type?: unknown }).type === 'DBX_ESCAPE_KEY'
+      ) {
+        handleEscapeHierarchy();
+      }
+    };
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', onBlur);
+    window.addEventListener('message', onIframeMessage);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
+      window.removeEventListener('message', onIframeMessage);
     };
   }, [
+    addElement,
+    adjustZIndex,
+    bottomDockOpen,
+    bringToFront,
     canvasHeight,
     canvasTool,
     canvasWidth,
     clipboardEl,
-    commitElements,
     commitWithUpdater,
+    copySelectedStyle,
     deleteSelected,
     duplicateSelected,
     editingContainerId,
-    elementsRef,
     fitCanvasToView,
+    flipSelected,
+    groupSelectedIntoBox,
+    handleCopyCode,
     handleOpenProject,
     handleSaveProject,
     handleSaveProjectAs,
     inlineEditId,
+    keybindings,
     layoutMode,
+    leftCollapsed,
+    pasteClipboardElement,
+    pasteStyleToSelected,
     redo,
+    rightCollapsed,
+    rotateSelected90,
+    selectAllElements,
     selectedElement,
     selectedId,
     selectedIds,
+    sendToBack,
     setDrawMarquee,
     setIsSpacePressed,
     setPanOffset,
     setZoom,
+    showHtmlImporterModal,
+    showLivePreviewModal,
+    showObjectForgeModal,
+    showSettingsModal,
+    showTemplatesModal,
+    spotlightOpen,
+    studioPrefs.nudgeStepPx,
+    studioPrefs.shiftNudgeStepPx,
     undo,
+    ungroupSelected,
   ]);
 
   return (
     <div
-      style={{
-        backgroundColor: 'var(--bg-app)',
-        color: 'var(--text-main)',
-        cursor:
-          panelResizeDrag?.target === 'left' || panelResizeDrag?.target === 'right'
-            ? 'col-resize'
-            : panelResizeDrag?.target === 'left_split' || panelResizeDrag?.target === 'bottom'
-            ? 'row-resize'
-            : panDrag?.moved
-            ? 'grabbing'
-            : undefined,
-      }}
-      className="h-screen w-screen flex flex-col select-none overflow-hidden"
+      style={
+        {
+          ...(uiTheme === 'cute' ? buildCuteThemeCssVars(studioPrefs.cuteThemeColors) : {}),
+          backgroundColor: 'var(--bg-app)',
+          color: 'var(--text-main)',
+          cursor:
+            panelResizeDrag?.target === 'left' || panelResizeDrag?.target === 'right'
+              ? 'col-resize'
+              : panelResizeDrag?.target === 'left_split' || panelResizeDrag?.target === 'bottom'
+              ? 'row-resize'
+              : panDrag?.moved
+              ? 'grabbing'
+              : undefined,
+        } as React.CSSProperties
+      }
+      className={`h-screen w-screen flex flex-col select-none overflow-hidden ${
+        studioPrefs.uiDensity === 'comfortable' ? 'text-[13px]' : 'text-xs'
+      }`}
+      data-ui-density={studioPrefs.uiDensity}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
@@ -1748,6 +2659,7 @@ export default function App() {
         saveNotice={saveNotice}
         layoutMode={layoutMode}
         platform={platform}
+        shieldedElementCount={shieldedElementCount}
         uiTheme={uiTheme}
         canUndo={canUndo}
         canRedo={canRedo}
@@ -1774,11 +2686,23 @@ export default function App() {
         onSaveProjectAs={() => {
           void handleSaveProjectAs();
         }}
-        onOpenShortcuts={() => setShowShortcutsModal(true)}
-        onOpenSettings={() => setShowSettingsModal(true)}
+        onOpenShortcuts={() => {
+          setSettingsInitialTab('shortcuts');
+          setShowSettingsModal(true);
+        }}
+        onOpenSettings={() => {
+          setSettingsInitialTab('general');
+          setShowSettingsModal(true);
+        }}
         onResetWorkspaceLayout={handleResetWorkspaceLayout}
         onChangeLayoutMode={setLayoutMode}
-        onToggleTheme={() => setUiTheme((t) => (t === 'carbon' ? 'paper' : 'carbon'))}
+        onToggleTheme={() =>
+          setUiTheme((t) => {
+            const next: UiTheme = t === 'carbon' ? 'paper' : t === 'paper' ? 'cute' : 'carbon';
+            if (next === 'cute') setPreviewSurface('th_cute');
+            return next;
+          })
+        }
         onChangePlatform={setPlatform}
         onUndo={undo}
         onRedo={redo}
@@ -1902,6 +2826,31 @@ export default function App() {
           rightCollapsed={rightCollapsed}
           copied={copied}
           swatches={swatches}
+          showRulers={studioPrefs.showRulers}
+          showSpacingBadges={studioPrefs.showSpacingBadges}
+          customBlueprints={customBlueprints}
+          spotlightOpen={spotlightOpen}
+          onToggleSpotlight={setSpotlightOpen}
+          onAddCatalogItemAtPosition={addCatalogItemAtPosition}
+          onAdjustZIndex={adjustZIndex}
+          onBringToFront={bringToFront}
+          onSendToBack={sendToBack}
+          onDuplicateSelected={duplicateSelected}
+          onToggleLock={toggleLock}
+          onToggleHide={toggleHide}
+          onUnlockAll={unlockAllElements}
+          onSelectAll={selectAllElements}
+          onCopySelected={() => selectedElement && setClipboardEl(selectedElement)}
+          onPasteAtPosition={pasteClipboardElement}
+          onCopyStyle={copySelectedStyle}
+          onPasteStyle={pasteStyleToSelected}
+          hasCopiedStyle={Boolean(copiedStyle)}
+          hasClipboardElement={Boolean(clipboardEl)}
+          onRotateSelected90={rotateSelected90}
+          onFlipSelected={flipSelected}
+          onPopOutFromContainer={popOutFromContainer}
+          onSaveSelectedAsBlueprint={saveSelectedElementAsBlueprint}
+          onUpdateElementById={updateElementById}
           canvasRef={canvasRef}
           canvasViewportRef={canvasViewportRef}
           canvasTransformRef={canvasTransformRef}
@@ -1981,6 +2930,11 @@ export default function App() {
           inspectorTab={inspectorTab}
           elements={elements}
           selectedElement={selectedElement}
+          selectedIds={selectedIds}
+          canvasWidth={canvasWidth}
+          canvasHeight={canvasHeight}
+          canvasBg={canvasBg}
+          canvasPattern={canvasPattern}
           containerCandidates={containerCandidates}
           nestedChildren={nestedChildren}
           layoutMode={layoutMode}
@@ -1993,6 +2947,18 @@ export default function App() {
           uploadingImage={uploadingImage}
           imageUploadTarget={imageUploadTarget}
           uploadNotice={uploadNotice}
+          onChangeCanvasWidth={setCanvasWidth}
+          onChangeCanvasHeight={setCanvasHeight}
+          onChangeCanvasBg={setCanvasBg}
+          onChangeCanvasPattern={setCanvasPattern}
+          onBatchUpdateSelected={updateSelected}
+          onAlignMultiSelected={alignMultiSelected}
+          onDistributeMultiSelected={distributeMultiSelected}
+          onGroupSelectedIntoBox={groupSelectedIntoBox}
+          onClearSelection={() => {
+            setSelectedId(null);
+            setSelectedIds([]);
+          }}
           onExpandRight={() => setRightCollapsed(false)}
           onCollapseRight={() => setRightCollapsed(true)}
           onStartPanelResize={setPanelResizeDrag}
@@ -2077,9 +3043,17 @@ export default function App() {
 
       <SettingsModal
         open={showSettingsModal}
+        initialTab={settingsInitialTab}
+        uiTheme={uiTheme}
         imgbbApiKey={imgbbApiKey}
         localSnapshots={localSnapshots}
         lastSnapshotAt={lastSnapshotAt}
+        studioPrefs={studioPrefs}
+        keybindings={keybindings}
+        onChangeUiTheme={(nextTheme) => {
+          setUiTheme(nextTheme);
+          if (nextTheme === 'cute') setPreviewSurface('th_cute');
+        }}
         onChangeImgbbKey={saveImgbbKey}
         onCreateSnapshot={() => {
           void createManualSnapshot();
@@ -2088,12 +3062,9 @@ export default function App() {
           void restoreLocalSnapshot(id);
           setShowSettingsModal(false);
         }}
+        onChangeStudioPrefs={handleChangeStudioPrefs}
+        onChangeKeybindings={handleChangeKeybindings}
         onClose={() => setShowSettingsModal(false)}
-      />
-
-      <ShortcutsModal
-        open={showShortcutsModal}
-        onClose={() => setShowShortcutsModal(false)}
       />
 
       <LivePreviewModal

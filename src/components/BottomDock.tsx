@@ -177,6 +177,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
                     { id: 'th_light', label: 'Light' },
                     { id: 'th_pink', label: 'Pink' },
                     { id: 'th_teal', label: 'Teal' },
+                    { id: 'th_cute', label: 'Cute ♡' },
                     { id: 'paper', label: 'Paper' },
                   ] as const
                 ).map((s) => (
