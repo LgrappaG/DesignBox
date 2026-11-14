@@ -1,4 +1,4 @@
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CanvasStage } from './components/CanvasStage';
 import { LeftSidebar, LeftSidebarTab } from './components/LeftSidebar';
 import { createDefaultModifier } from './components/ModifierStackSection';
@@ -56,7 +56,7 @@ import {
 } from './utils/elementHierarchy';
 import { processLocalImageFile } from './utils/imageUpload';
 import {
-  buildCuteThemeCssVars,
+  applyStudioThemeToDocument,
   extractDesignImageUrls,
   KeybindingMap,
   loadKeybindings,
@@ -394,11 +394,11 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [studioPrefs.autoSnapshotIntervalSec, createManualSnapshot]);
 
-  // Persist Studio UI Preferences
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', uiTheme);
+  // Persist Studio UI Preferences & apply document CSS theme variables synchronously before paint
+  useLayoutEffect(() => {
+    applyStudioThemeToDocument(uiTheme, studioPrefs.cuteThemeColors);
     localStorage.setItem('dbx_ui_theme_v2', uiTheme);
-  }, [uiTheme]);
+  }, [uiTheme, studioPrefs.cuteThemeColors]);
 
   useEffect(() => {
     try {
@@ -613,7 +613,11 @@ export default function App() {
     canvasPattern,
   ]);
 
+  const isPreviewVisible =
+    showLivePreviewModal || (bottomDockOpen && bottomDockTab === 'preview');
+
   const previewSrcDoc = useMemo(() => {
+    if (!isPreviewVisible) return '';
     const cute = studioPrefs.cuteThemeColors;
     const themeMap: Record<
       PreviewSurface,
@@ -1254,6 +1258,7 @@ export default function App() {
   </body>
 </html>`;
   }, [
+    isPreviewVisible,
     canvasWidth,
     elements,
     exportResult.html,
@@ -2649,7 +2654,6 @@ export default function App() {
     <div
       style={
         {
-          ...(uiTheme === 'cute' ? buildCuteThemeCssVars(studioPrefs.cuteThemeColors) : {}),
           backgroundColor: 'var(--bg-app)',
           color: 'var(--text-main)',
           cursor:
@@ -2818,6 +2822,7 @@ export default function App() {
           layoutMode={layoutMode}
           platform={platform}
           uiTheme={uiTheme}
+          cuteThemeColors={studioPrefs.cuteThemeColors}
           canvasWidth={canvasWidth}
           canvasHeight={canvasHeight}
           canvasBg={canvasBg}

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Check,
   Download,
@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { LayoutMode, UiTheme } from '../../types/schema';
 import {
+  applyStudioThemeToDocument,
   CUTE_THEME_PRESETS,
   CuteThemeColors,
   DEFAULT_CUTE_THEME_COLORS,
@@ -78,14 +79,73 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [importError, setImportError] = useState<string | null>(null);
   const importFileRef = useRef<HTMLInputElement | null>(null);
 
+  const [draftCuteColors, setDraftCuteColors] = useState<CuteThemeColors>(
+    studioPrefs.cuteThemeColors
+  );
+  const draftCuteColorsRef = useRef<CuteThemeColors>(studioPrefs.cuteThemeColors);
+  const studioPrefsRef = useRef<StudioPreferences>(studioPrefs);
+  studioPrefsRef.current = studioPrefs;
+  const onChangeStudioPrefsRef = useRef(onChangeStudioPrefs);
+  onChangeStudioPrefsRef.current = onChangeStudioPrefs;
+  const rafIdRef = useRef<number | null>(null);
+  const commitTimerRef = useRef<number | null>(null);
+  const pendingCommitColorsRef = useRef<CuteThemeColors | null>(null);
+
+  const flushPendingCuteCommit = useCallback(() => {
+    if (commitTimerRef.current !== null) {
+      window.clearTimeout(commitTimerRef.current);
+      commitTimerRef.current = null;
+    }
+    const pending = pendingCommitColorsRef.current;
+    if (pending) {
+      pendingCommitColorsRef.current = null;
+      onChangeStudioPrefsRef.current({
+        ...studioPrefsRef.current,
+        cuteThemeColors: pending,
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    setDraftCuteColors(studioPrefs.cuteThemeColors);
+    draftCuteColorsRef.current = studioPrefs.cuteThemeColors;
+  }, [studioPrefs.cuteThemeColors]);
+
   useEffect(() => {
     if (open) {
       setActiveTab(initialTab);
       setRecordingId(null);
       setConflictNotice(null);
       setImportError(null);
+      setDraftCuteColors(studioPrefsRef.current.cuteThemeColors);
+      draftCuteColorsRef.current = studioPrefsRef.current.cuteThemeColors;
+    } else {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      flushPendingCuteCommit();
     }
-  }, [open, initialTab]);
+  }, [open, initialTab, flushPendingCuteCommit]);
+
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      flushPendingCuteCommit();
+    };
+  }, [flushPendingCuteCommit]);
+
+  const handleClose = useCallback(() => {
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    flushPendingCuteCommit();
+    onClose();
+  }, [flushPendingCuteCommit, onClose]);
 
   useEffect(() => {
     if (!open || !recordingId) return;
@@ -199,7 +259,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   return (
     <div
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) handleClose();
       }}
       className="fixed inset-0 z-[200] bg-black/75 flex items-center justify-center p-4 sm:p-6"
     >
@@ -220,7 +280,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             style={{
               backgroundColor: 'var(--bg-panel-alt)',
               borderColor: 'var(--border-strong)',
@@ -307,8 +367,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         id: 'cute',
                         label: '♡ Kawaii Cute',
                         desc: 'Pastel pink & lilac',
-                        previewBg: studioPrefs.cuteThemeColors.bgApp,
-                        previewAccent: studioPrefs.cuteThemeColors.accentPrimary,
+                        previewBg: draftCuteColors.bgApp,
+                        previewAccent: draftCuteColors.accentPrimary,
                         icon: Heart,
                       },
                     ] as const
@@ -373,10 +433,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <button
                       type="button"
                       onClick={() => {
+                        if (rafIdRef.current !== null) {
+                          cancelAnimationFrame(rafIdRef.current);
+                          rafIdRef.current = null;
+                        }
+                        if (commitTimerRef.current !== null) {
+                          window.clearTimeout(commitTimerRef.current);
+                          commitTimerRef.current = null;
+                        }
+                        pendingCommitColorsRef.current = null;
+                        const nextColors = { ...DEFAULT_CUTE_THEME_COLORS };
+                        draftCuteColorsRef.current = nextColors;
+                        setDraftCuteColors(nextColors);
+                        applyStudioThemeToDocument('cute', nextColors);
                         onChangeUiTheme('cute');
                         onChangeStudioPrefs({
                           ...studioPrefs,
-                          cuteThemeColors: { ...DEFAULT_CUTE_THEME_COLORS },
+                          cuteThemeColors: nextColors,
                         });
                       }}
                       style={{ color: 'var(--accent)' }}
@@ -393,10 +466,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         key={preset.id}
                         type="button"
                         onClick={() => {
+                          if (rafIdRef.current !== null) {
+                            cancelAnimationFrame(rafIdRef.current);
+                            rafIdRef.current = null;
+                          }
+                          if (commitTimerRef.current !== null) {
+                            window.clearTimeout(commitTimerRef.current);
+                            commitTimerRef.current = null;
+                          }
+                          pendingCommitColorsRef.current = null;
+                          const nextColors = { ...preset.colors };
+                          draftCuteColorsRef.current = nextColors;
+                          setDraftCuteColors(nextColors);
+                          applyStudioThemeToDocument('cute', nextColors);
                           onChangeUiTheme('cute');
                           onChangeStudioPrefs({
                             ...studioPrefs,
-                            cuteThemeColors: { ...preset.colors },
+                            cuteThemeColors: nextColors,
                           });
                         }}
                         style={{
@@ -423,6 +509,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         { key: 'bgPanel', label: 'Panel Surface' },
                         { key: 'bgPanelAlt', label: 'Alt Panel / Bar' },
                         { key: 'bgCanvasWell', label: 'Canvas Well' },
+                        { key: 'rulerBg', label: 'Ruler Background' },
+                        { key: 'rulerTick', label: 'Ruler Ticks & Text' },
                         { key: 'accentPrimary', label: 'Accent (Pink)' },
                         { key: 'accentSecondary', label: 'Accent 2 (Lilac)' },
                         { key: 'borderMain', label: 'Border Tone' },
@@ -430,7 +518,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         { key: 'textMuted', label: 'Muted Text' },
                       ] as Array<{ key: keyof CuteThemeColors; label: string }>
                     ).map((field) => {
-                      const val = studioPrefs.cuteThemeColors[field.key];
+                      const val = draftCuteColors[field.key];
                       return (
                         <label
                           key={field.key}
@@ -455,15 +543,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             type="color"
                             value={val}
                             onChange={(e) => {
+                              const nextHex = e.target.value.toUpperCase();
+                              const prev = draftCuteColorsRef.current;
+                              const nextColors: CuteThemeColors = {
+                                ...prev,
+                                [field.key]: nextHex,
+                              };
+                              if (
+                                field.key === 'bgPanelAlt' &&
+                                prev.rulerBg.toUpperCase() === prev.bgPanelAlt.toUpperCase()
+                              ) {
+                                nextColors.rulerBg = nextHex;
+                              }
+                              if (
+                                field.key === 'textMuted' &&
+                                prev.rulerTick.toUpperCase() === prev.textMuted.toUpperCase()
+                              ) {
+                                nextColors.rulerTick = nextHex;
+                              }
+
+                              draftCuteColorsRef.current = nextColors;
+                              pendingCommitColorsRef.current = nextColors;
+                              setDraftCuteColors(nextColors);
+
                               if (uiTheme !== 'cute') onChangeUiTheme('cute');
-                              onChangeStudioPrefs({
-                                ...studioPrefs,
-                                cuteThemeColors: {
-                                  ...studioPrefs.cuteThemeColors,
-                                  [field.key]: e.target.value.toUpperCase(),
-                                },
+
+                              if (rafIdRef.current !== null) {
+                                cancelAnimationFrame(rafIdRef.current);
+                              }
+                              rafIdRef.current = requestAnimationFrame(() => {
+                                rafIdRef.current = null;
+                                applyStudioThemeToDocument('cute', draftCuteColorsRef.current);
                               });
+
+                              if (commitTimerRef.current !== null) {
+                                window.clearTimeout(commitTimerRef.current);
+                              }
+                              commitTimerRef.current = window.setTimeout(() => {
+                                flushPendingCuteCommit();
+                              }, 140);
                             }}
+                            onBlur={() => flushPendingCuteCommit()}
                             className="w-6 h-6 rounded-md border-0 bg-transparent cursor-pointer shrink-0 p-0"
                             title={`Pick ${field.label}`}
                           />

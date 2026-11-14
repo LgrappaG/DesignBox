@@ -17,6 +17,7 @@ import {
   Focus,
   FolderPlus,
   Hand,
+  Link2,
   Lock,
   MousePointer,
   Minus,
@@ -35,19 +36,23 @@ import {
 } from 'lucide-react';
 import { DynamicRulerCanvas } from './DynamicRulers';
 import { BottomDock } from './BottomDock';
+import { CANVAS_SIZE_PRESETS } from './inspector/BatchAndCanvasInspector';
 import {
   CanvasContextMenu,
   CanvasContextMenuState,
   FloatingSelectionBar,
   SpotlightQuickAddModal,
 } from './CanvasOverlays';
+import { CuteThemeColors } from '../utils/studioSettings';
 import { isPureContainerType } from '../data/purePrimitives';
 import { SearchableCatalogItem, STATIC_CATALOG } from '../data/searchCatalog';
 import {
   getElementF2UShieldReport,
+  isSafeUrlValue,
   maskElementForF2USimulation,
 } from '../engine/f2uShield';
 import {
+  getElementEffectiveLinkUrl,
   getFontFamilyCSS,
   isFloatingCollageElement,
   renderInnerElementHTML,
@@ -90,6 +95,7 @@ export interface CanvasStageProps {
   layoutMode: LayoutMode;
   platform: TargetPlatform;
   uiTheme: UiTheme;
+  cuteThemeColors?: CuteThemeColors;
   canvasWidth: number;
   canvasHeight: number;
   canvasBg: string;
@@ -218,6 +224,15 @@ export interface CanvasStageProps {
   onOpenRightCodeTab: () => void;
 }
 
+function openCanvasElementLink(rawUrl: string): void {
+  const trimmed = rawUrl.trim();
+  if (!trimmed || trimmed === '#' || !isSafeUrlValue(trimmed)) return;
+  const href = /^(https?:\/\/|mailto:|\/|#)/i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+  window.open(href, '_blank', 'noopener,noreferrer');
+}
+
 const RESIZE_HANDLES: ReadonlyArray<{ dir: ResizeDir; cls: string }> = [
   { dir: 'nw', cls: '-top-1.5 -left-1.5 cursor-nwse-resize' },
   { dir: 'n', cls: '-top-1.5 left-1/2 -translate-x-1/2 cursor-ns-resize' },
@@ -237,6 +252,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
   layoutMode,
   platform,
   uiTheme,
+  cuteThemeColors,
   canvasWidth,
   canvasHeight,
   canvasBg,
@@ -308,6 +324,8 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
   canvasRef,
   canvasViewportRef,
   canvasTransformRef,
+  onChangeCanvasWidth,
+  onChangeCanvasHeight,
   onChangeCanvasBg,
   onToggleMagneticSnap,
   onChangeShowHybridOverlay,
@@ -358,6 +376,43 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
   const [spotlightTargetPos, setSpotlightTargetPos] = React.useState<{ x: number; y: number } | null>(
     null
   );
+  const [widthDraft, setWidthDraft] = React.useState<string>(() => String(canvasWidth));
+  const [heightDraft, setHeightDraft] = React.useState<string>(() => String(canvasHeight));
+
+  React.useEffect(() => {
+    setWidthDraft(String(canvasWidth));
+  }, [canvasWidth]);
+
+  React.useEffect(() => {
+    setHeightDraft(String(canvasHeight));
+  }, [canvasHeight]);
+
+  const matchedCanvasPreset = React.useMemo(
+    () => CANVAS_SIZE_PRESETS.find((p) => p.w === canvasWidth && p.h === canvasHeight),
+    [canvasWidth, canvasHeight]
+  );
+
+  const commitWidthDraft = () => {
+    const val = parseInt(widthDraft, 10);
+    if (Number.isNaN(val)) {
+      setWidthDraft(String(canvasWidth));
+      return;
+    }
+    const clamped = Math.max(240, Math.min(2400, val));
+    onChangeCanvasWidth?.(clamped);
+    setWidthDraft(String(clamped));
+  };
+
+  const commitHeightDraft = () => {
+    const val = parseInt(heightDraft, 10);
+    if (Number.isNaN(val)) {
+      setHeightDraft(String(canvasHeight));
+      return;
+    }
+    const clamped = Math.max(180, Math.min(3200, val));
+    onChangeCanvasHeight?.(clamped);
+    setHeightDraft(String(clamped));
+  };
 
   const isToyhouseFreePlatform = platform === 'toyhouse_free' || platform === 'toyhouse_oc';
   const f2uShieldMap = React.useMemo(() => {
@@ -562,6 +617,119 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
             </button>
           )}
 
+          {/* Always-Visible Canvas Size & Preset Bar */}
+          <div
+            style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}
+            className="flex items-center border rounded-[6px] px-1.5 py-0.5 gap-1"
+            title="Active Canvas Dimensions (W × H) & Presets"
+          >
+            <button
+              type="button"
+              onClick={() => onSelectElement(null, [])}
+              style={{ color: 'var(--text-muted)' }}
+              className="text-[9.5px] font-semibold uppercase tracking-wide hover:text-[var(--accent)] transition pr-0.5"
+              title="Click to open Canvas & Backdrop Setup in Right Inspector"
+            >
+              Canvas
+            </button>
+            <select
+              aria-label="Canvas Size Preset"
+              value={matchedCanvasPreset ? matchedCanvasPreset.id : 'custom'}
+              onChange={(e) => {
+                const found = CANVAS_SIZE_PRESETS.find((p) => p.id === e.target.value);
+                if (found) {
+                  onChangeCanvasWidth?.(found.w);
+                  onChangeCanvasHeight?.(found.h);
+                }
+              }}
+              style={{
+                backgroundColor: 'var(--bg-panel)',
+                borderColor: 'var(--border-strong)',
+                color: 'var(--text-main)',
+              }}
+              className="border rounded-[4px] px-1 py-0.5 text-[10px] max-w-[125px] truncate focus:outline-none focus:border-[var(--accent)]"
+            >
+              {CANVAS_SIZE_PRESETS.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.label}
+                </option>
+              ))}
+              {!matchedCanvasPreset && (
+                <option value="custom">
+                  Custom ({canvasWidth}×{canvasHeight})
+                </option>
+              )}
+            </select>
+            <input
+              type="number"
+              aria-label="Canvas Width (px)"
+              min={240}
+              max={2400}
+              value={widthDraft}
+              onChange={(e) => {
+                setWidthDraft(e.target.value);
+                const val = parseInt(e.target.value, 10);
+                if (!Number.isNaN(val) && val >= 240 && val <= 2400) {
+                  onChangeCanvasWidth?.(val);
+                }
+              }}
+              onBlur={commitWidthDraft}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  commitWidthDraft();
+                  e.currentTarget.blur();
+                }
+              }}
+              style={{
+                backgroundColor: 'var(--bg-panel)',
+                borderColor: 'var(--border-strong)',
+                color: 'var(--text-main)',
+              }}
+              className="w-[46px] border rounded-[4px] px-1 py-0.5 text-[10px] font-mono text-center focus:outline-none focus:border-[var(--accent)]"
+              title="Canvas Width (px)"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                onChangeCanvasWidth?.(canvasHeight);
+                onChangeCanvasHeight?.(canvasWidth);
+              }}
+              style={{ color: 'var(--text-muted)' }}
+              className="px-0.5 text-[10px] font-mono hover:text-[var(--accent)] transition"
+              title="Swap Canvas Width and Height"
+            >
+              ⇄
+            </button>
+            <input
+              type="number"
+              aria-label="Canvas Height (px)"
+              min={180}
+              max={3200}
+              value={heightDraft}
+              onChange={(e) => {
+                setHeightDraft(e.target.value);
+                const val = parseInt(e.target.value, 10);
+                if (!Number.isNaN(val) && val >= 180 && val <= 3200) {
+                  onChangeCanvasHeight?.(val);
+                }
+              }}
+              onBlur={commitHeightDraft}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  commitHeightDraft();
+                  e.currentTarget.blur();
+                }
+              }}
+              style={{
+                backgroundColor: 'var(--bg-panel)',
+                borderColor: 'var(--border-strong)',
+                color: 'var(--text-main)',
+              }}
+              className="w-[46px] border rounded-[4px] px-1 py-0.5 text-[10px] font-mono text-center focus:outline-none focus:border-[var(--accent)]"
+              title="Canvas Height (px)"
+            />
+          </div>
+
           <div
             style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}
             className="flex items-center border rounded-[6px] px-1 gap-0.5"
@@ -645,6 +813,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                 zoom={zoom}
                 cursorCanvasPos={cursorInViewport ? cursorCoords.x : null}
                 uiTheme={uiTheme}
+                cuteThemeColors={cuteThemeColors}
                 guides={guides}
                 onStartCreateGuide={(e) => {
                   if (e.button === 0) onStartGuideDrag('y', e.clientX, e.clientY);
@@ -669,6 +838,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                 zoom={zoom}
                 cursorCanvasPos={cursorInViewport ? cursorCoords.y : null}
                 uiTheme={uiTheme}
+                cuteThemeColors={cuteThemeColors}
                 guides={guides}
                 onStartCreateGuide={(e) => {
                   if (e.button === 0) onStartGuideDrag('x', e.clientX, e.clientY);
@@ -960,12 +1130,17 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                       <div className="grid grid-cols-12 gap-3">
                         {row.elements.map(({ element: el, calculatedColSpan }) => {
                           const shieldReport = f2uShieldMap.get(el.id);
+                          const activeLinkUrl = getElementEffectiveLinkUrl(el);
                           return (
                             <div
                               key={el.id}
                               onPointerDown={(e) => e.stopPropagation()}
                               onClick={(e) => {
                                 e.stopPropagation();
+                                if ((e.ctrlKey || e.metaKey) && activeLinkUrl) {
+                                  openCanvasElementLink(activeLinkUrl);
+                                  return;
+                                }
                                 onSelectElement(el.id, [el.id]);
                               }}
                               style={{
@@ -975,6 +1150,21 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                                 selectedId === el.id ? 'ring-2 ring-amber-600 rounded-[8px]' : ''
                               }`}
                             >
+                              {activeLinkUrl && (
+                                <button
+                                  type="button"
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openCanvasElementLink(activeLinkUrl);
+                                  }}
+                                  className="absolute top-1 left-1.5 text-[8.5px] font-mono font-bold px-1.5 py-0.5 rounded-[4px] bg-sky-600/95 hover:bg-sky-500 text-white z-30 shadow flex items-center gap-1 transition"
+                                  title={`Linked: ${activeLinkUrl} (Click badge or Ctrl+Click element to test)`}
+                                >
+                                  <Link2 className="w-2.5 h-2.5 shrink-0" />
+                                  <span>LINK</span>
+                                </button>
+                              )}
                               <div className="absolute top-1 right-1.5 text-[9px] font-mono px-1.5 py-0.5 rounded-[4px] bg-stone-900/85 text-amber-300 z-20">
                                 col-{calculatedColSpan}
                               </div>
@@ -1274,6 +1464,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                     const isInlineEditing = inlineEditId === el.id;
                     const isFloating = isFloatingCollageElement(el);
                     const shieldReport = f2uShieldMap.get(el.id);
+                    const activeLinkUrl = getElementEffectiveLinkUrl(el);
                     const canvasEl = isToyhouseFreePlatform ? maskElementForF2USimulation(el) : el;
                     const solvedCol =
                       solvedRows
@@ -1287,6 +1478,10 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                         onClick={(e) => {
                           if (canvasTool !== 'select') return;
                           e.stopPropagation();
+                          if ((e.ctrlKey || e.metaKey) && activeLinkUrl) {
+                            openCanvasElementLink(activeLinkUrl);
+                            return;
+                          }
                           if (e.shiftKey) {
                             onToggleMultiSelectElement(el.id);
                           } else {
@@ -1368,13 +1563,32 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                             DROP INSIDE: {el.label}
                           </div>
                         )}
-                        {el.locked && (
-                          <div
-                            style={{ backgroundColor: '#D97706', color: '#fff' }}
-                            className="absolute top-1 left-1 text-[9px] font-mono px-1.5 py-0.5 rounded-[4px] z-30 pointer-events-none shadow-sm flex items-center gap-1"
-                          >
-                            <Lock className="w-2.5 h-2.5" />
-                            <span>LOCKED</span>
+                        {(el.locked || activeLinkUrl) && (
+                          <div className="absolute top-1 left-1 flex items-center gap-1 z-30 pointer-events-none">
+                            {el.locked && (
+                              <div
+                                style={{ backgroundColor: '#D97706', color: '#fff' }}
+                                className="text-[9px] font-mono px-1.5 py-0.5 rounded-[4px] shadow-sm flex items-center gap-1"
+                              >
+                                <Lock className="w-2.5 h-2.5" />
+                                <span>LOCKED</span>
+                              </div>
+                            )}
+                            {activeLinkUrl && (
+                              <button
+                                type="button"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openCanvasElementLink(activeLinkUrl);
+                                }}
+                                className="pointer-events-auto text-[8.5px] font-mono font-bold px-1.5 py-0.5 rounded-[4px] bg-sky-600/95 hover:bg-sky-500 text-white shadow-sm flex items-center gap-1 transition"
+                                title={`Linked: ${activeLinkUrl} (Click badge or Ctrl+Click element to test)`}
+                              >
+                                <Link2 className="w-2.5 h-2.5 shrink-0" />
+                                <span>LINK</span>
+                              </button>
+                            )}
                           </div>
                         )}
                         {el.hidden && (
@@ -1660,11 +1874,16 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                             const cx = editingContainer.x + bL + pRect.paneX + ox;
                             const cy = editingContainer.y + bT + pRect.paneY + oy;
                             const isChildSelected = selectedId === child.id;
+                            const activeChildLink = getElementEffectiveLinkUrl(child);
                             return (
                               <div
                                 key={`iso-child-${child.id}`}
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  if ((e.ctrlKey || e.metaKey) && activeChildLink) {
+                                    openCanvasElementLink(activeChildLink);
+                                    return;
+                                  }
                                   onSelectElement(child.id, [child.id]);
                                 }}
                                 onPointerDown={(e) =>

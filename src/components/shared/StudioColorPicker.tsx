@@ -76,12 +76,35 @@ export const StudioColorPanel: React.FC<StudioColorPanelProps> = ({
   const [hexDraft, setHexDraft] = useState<string>(parsed.hex);
 
   const lastEmittedRef = useRef<string | undefined>(undefined);
+  const rafEmitRef = useRef<number | null>(null);
+  const pendingEmitRef = useRef<string | null>(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
   const svAreaRef = useRef<HTMLDivElement>(null);
   const hueBarRef = useRef<HTMLDivElement>(null);
   const alphaBarRef = useRef<HTMLDivElement>(null);
 
+  const flushPendingEmit = useCallback(() => {
+    if (rafEmitRef.current !== null) {
+      cancelAnimationFrame(rafEmitRef.current);
+      rafEmitRef.current = null;
+    }
+    const pending = pendingEmitRef.current;
+    if (pending !== null) {
+      pendingEmitRef.current = null;
+      onChangeRef.current(pending);
+    }
+  }, []);
+
   useEffect(() => {
-    if (value === lastEmittedRef.current) return;
+    return () => {
+      flushPendingEmit();
+    };
+  }, [flushPendingEmit]);
+
+  useEffect(() => {
+    if (value === lastEmittedRef.current || pendingEmitRef.current !== null) return;
     lastEmittedRef.current = value;
 
     const nextParsed = parseColorValue(value, fallbackHex);
@@ -97,7 +120,7 @@ export const StudioColorPanel: React.FC<StudioColorPanelProps> = ({
   }, [value, fallbackHex]);
 
   const emitColor = useCallback(
-    (nextHsv: HsvColor, nextAlpha: number) => {
+    (nextHsv: HsvColor, nextAlpha: number, immediate = false) => {
       const clampedAlpha = allowAlpha ? clamp(nextAlpha, 0, 1) : nextAlpha <= 0.001 && allowTransparent ? 0 : 1;
       const nextHex = hsvToHex(nextHsv);
       const formatted = formatColorOutput(nextHex, clampedAlpha);
@@ -105,9 +128,28 @@ export const StudioColorPanel: React.FC<StudioColorPanelProps> = ({
       setHsv(nextHsv);
       setAlpha(clampedAlpha);
       setHexDraft(nextHex);
-      onChange(formatted);
+      if (immediate) {
+        if (rafEmitRef.current !== null) {
+          cancelAnimationFrame(rafEmitRef.current);
+          rafEmitRef.current = null;
+        }
+        pendingEmitRef.current = null;
+        onChangeRef.current(formatted);
+        return;
+      }
+      pendingEmitRef.current = formatted;
+      if (rafEmitRef.current === null) {
+        rafEmitRef.current = requestAnimationFrame(() => {
+          rafEmitRef.current = null;
+          const pending = pendingEmitRef.current;
+          if (pending !== null) {
+            pendingEmitRef.current = null;
+            onChangeRef.current(pending);
+          }
+        });
+      }
     },
-    [allowAlpha, allowTransparent, onChange]
+    [allowAlpha, allowTransparent]
   );
 
   const handleSvPointer = useCallback(
@@ -174,7 +216,7 @@ export const StudioColorPanel: React.FC<StudioColorPanelProps> = ({
       const normalized = normalizeHexColor(result.sRGBHex);
       if (normalized) {
         const pickedHsv = hexToHsv(normalized);
-        emitColor(pickedHsv, alpha <= 0.01 ? 1 : alpha);
+        emitColor(pickedHsv, alpha <= 0.01 ? 1 : alpha, true);
       }
     } catch {
       // User cancelled native eyedropper cleanly; ignore abort error.
@@ -218,6 +260,8 @@ export const StudioColorPanel: React.FC<StudioColorPanelProps> = ({
           if (e.buttons === 0) return;
           handleSvPointer(e.clientX, e.clientY);
         }}
+        onPointerUp={() => flushPendingEmit()}
+        onPointerCancel={() => flushPendingEmit()}
         style={{ backgroundColor: hueColor }}
         className={`relative w-full ${compact ? 'h-28' : 'h-36'} rounded-lg overflow-hidden border border-[var(--border-strong)] cursor-crosshair touch-none shadow-inner`}
       >
@@ -252,6 +296,8 @@ export const StudioColorPanel: React.FC<StudioColorPanelProps> = ({
             if (e.buttons === 0) return;
             handleHuePointer(e.clientX);
           }}
+          onPointerUp={() => flushPendingEmit()}
+          onPointerCancel={() => flushPendingEmit()}
           style={{
             background:
               'linear-gradient(to right, #FF0000 0%, #FFFF00 17%, #00FF00 33%, #00FFFF 50%, #0000FF 67%, #FF00FF 83%, #FF0000 100%)',
@@ -281,6 +327,8 @@ export const StudioColorPanel: React.FC<StudioColorPanelProps> = ({
                 if (e.buttons === 0) return;
                 handleAlphaPointer(e.clientX);
               }}
+              onPointerUp={() => flushPendingEmit()}
+              onPointerCancel={() => flushPendingEmit()}
               style={CHECKERBOARD_STYLE}
               className="relative flex-1 h-3 rounded-full overflow-hidden border border-[var(--border-strong)] cursor-pointer touch-none"
             >
@@ -346,11 +394,16 @@ export const StudioColorPanel: React.FC<StudioColorPanelProps> = ({
             type="button"
             onClick={() => {
               if (parsed.isTransparent) {
-                emitColor(hsv, 1);
+                emitColor(hsv, 1, true);
               } else {
+                if (rafEmitRef.current !== null) {
+                  cancelAnimationFrame(rafEmitRef.current);
+                  rafEmitRef.current = null;
+                }
+                pendingEmitRef.current = null;
                 lastEmittedRef.current = 'transparent';
                 setAlpha(0);
-                onChange('transparent');
+                onChangeRef.current('transparent');
               }
             }}
             title={parsed.isTransparent ? 'Restore solid color' : 'Set transparent'}
@@ -368,8 +421,13 @@ export const StudioColorPanel: React.FC<StudioColorPanelProps> = ({
           <button
             type="button"
             onClick={() => {
+              if (rafEmitRef.current !== null) {
+                cancelAnimationFrame(rafEmitRef.current);
+                rafEmitRef.current = null;
+              }
+              pendingEmitRef.current = null;
               lastEmittedRef.current = 'inherit';
-              onChange('inherit');
+              onChangeRef.current('inherit');
             }}
             title={`Set to ${inheritLabel}`}
             className={`h-7 px-2 rounded-md border text-[10px] font-semibold transition shrink-0 flex items-center gap-1 ${
@@ -412,7 +470,7 @@ export const StudioColorPanel: React.FC<StudioColorPanelProps> = ({
                 <button
                   key={hex}
                   type="button"
-                  onClick={() => emitColor(hexToHsv(norm), 1)}
+                  onClick={() => emitColor(hexToHsv(norm), 1, true)}
                   title={norm}
                   style={{ backgroundColor: norm }}
                   className={`w-5 h-5 rounded-md border transition hover:scale-110 flex items-center justify-center ${

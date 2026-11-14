@@ -111,6 +111,33 @@ export function getFontAwesomeFlipClass(flipH?: boolean, flipV?: boolean): strin
   return '';
 }
 
+export function getElementEffectiveLinkUrl(el: DesignElement): string | null {
+  if (el.type === 'button' || el.type === 'pure_link') {
+    const raw = (el.linkUrl || el.url || '').trim();
+    return raw && raw !== '#' ? raw : null;
+  }
+  if (el.type === 'image' || el.type === 'pure_image_slot') {
+    if (el.clickAction === 'lightbox') return null;
+    if (el.clickAction === 'link') {
+      const raw = (el.linkUrl || el.url || '').trim();
+      return raw && raw !== '#' ? raw : null;
+    }
+    const raw = (el.linkUrl || '').trim();
+    return raw && raw !== '#' ? raw : null;
+  }
+  if (
+    el.collapsible ||
+    el.type === 'accordion' ||
+    el.type === 'pure_spoiler' ||
+    el.type === 'pure_collapse' ||
+    el.f2uCollapseRole === 'trigger'
+  ) {
+    return null;
+  }
+  const raw = (el.linkUrl || '').trim();
+  return raw && raw !== '#' ? raw : null;
+}
+
 function sanitizeElementTextForExport(el: DesignElement, isToyhouseFree: boolean): DesignElement {
   return {
     ...el,
@@ -1085,8 +1112,6 @@ export function renderInnerElementHTML(
     .filter(Boolean)
     .join(' ');
 
-  let wrapBoxLinkAfterGeo = false;
-
   const finalizeElementHTML = (rawHtml: string): string => {
     let out = rawHtml;
     if (f2uFaVectorOverlayHtml) {
@@ -1118,8 +1143,22 @@ export function renderInnerElementHTML(
       const innerClean = out.replace(`class="${classes}" `, '').replace(`class="${classes}"`, '');
       out = `<div class="${classes}" style="${geoOuterShellStyle}">${innerClean}</div>`;
     }
-    if (wrapBoxLinkAfterGeo && el.linkUrl && !el.collapsible) {
-      out = `<a href="${sanitizeHrefUrl(el.linkUrl)}" target="${el.linkTarget || '_blank'}" rel="noopener noreferrer" style="text-decoration: none; color: inherit; display: block; height: 100%;" title="${escapeHtmlAttr(el.tooltip || el.content || 'Link')}">${out}</a>`;
+    const rawLinkUrl = (el.linkUrl || '').trim();
+    const canWrapOuterLink =
+      Boolean(rawLinkUrl) &&
+      rawLinkUrl !== '#' &&
+      !el.collapsible &&
+      el.type !== 'button' &&
+      el.type !== 'pure_link' &&
+      el.type !== 'image' &&
+      !(el.type === 'pure_image_slot' && Boolean(el.url && el.url.trim())) &&
+      el.type !== 'accordion' &&
+      el.type !== 'pure_spoiler' &&
+      el.type !== 'pure_collapse' &&
+      el.f2uCollapseRole !== 'trigger' &&
+      !/(?:<a\b|<details\b)/i.test(out);
+    if (canWrapOuterLink) {
+      out = `<a href="${sanitizeHrefUrl(rawLinkUrl)}" target="${el.linkTarget || '_blank'}" rel="noopener noreferrer" style="text-decoration: none; color: inherit; display: block; position: relative; width: 100%; height: ${el.autoHeight ? 'auto' : '100%'}; cursor: pointer;">${out}</a>`;
     }
     if (maskCss && maskRingOverlaysHtml) {
       out = `<div style="position: relative; width: 100%; height: ${el.autoHeight ? 'auto' : '100%'};">\n${out}\n${maskRingOverlaysHtml}\n</div>`;
@@ -1636,8 +1675,12 @@ export function renderInnerElementHTML(
 
       // Handle Click Lightbox or Link
       let finalWrappedInner = imgContentHtml;
-      if (el.clickAction === 'link') {
-        finalWrappedInner = `<a href="${sanitizeHrefUrl(el.linkUrl || primaryImgRaw, '#')}" target="_blank" rel="noopener noreferrer" style="width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-decoration: none; color: inherit; cursor: pointer;">${imgContentHtml}</a>`;
+      const hasImageLink =
+        el.clickAction === 'link' ||
+        (el.clickAction !== 'lightbox' && Boolean(el.linkUrl && el.linkUrl.trim()));
+      if (hasImageLink) {
+        const imgLinkTarget = el.linkTarget || '_blank';
+        finalWrappedInner = `<a href="${sanitizeHrefUrl(el.linkUrl || primaryImgRaw, '#')}" target="${imgLinkTarget}" rel="noopener noreferrer" style="width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-decoration: none; color: inherit; cursor: pointer;">${imgContentHtml}</a>`;
       } else if (el.clickAction === 'lightbox') {
         finalWrappedInner = renderLightboxMarkup({
           lbId: `dbx-lb-${el.id}`,
@@ -1665,17 +1708,19 @@ export function renderInnerElementHTML(
 
     case 'button': {
       const btnCls = `${classes} ${isToyhouse ? (isFreeformFixed && !el.autoHeight ? 'btn' : 'btn btn-block') : ''}`;
+      const btnHref = sanitizeHrefUrl(el.linkUrl || el.url, '#');
+      const btnTarget = el.linkTarget || '_blank';
       if (isBoxF2UGeo && hasUniformBorder && (!hasCustomBgSurface || isToyhouseFree)) {
         const innerBtnBg = buildF2UQuadrantSurfaceCss(
           effectiveBoxShape!,
           el.bgColor && el.bgColor !== 'transparent' ? el.bgColor : el.shapeMaskBgColor || '#FAF8F5',
           el.shapeCutPx
         );
-        return `<a href="${sanitizeHrefUrl(el.url, '#')}" class="${btnCls}" style="${baseStyle}; ${buildF2UQuadrantSurfaceCss(effectiveBoxShape!, el.borderColor, el.shapeCutPx)}; padding: ${Math.max(1, el.borderWidth)}px; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%; '}cursor: pointer;">
+        return `<a href="${btnHref}" target="${btnTarget}" rel="noopener noreferrer" class="${btnCls}" style="${baseStyle}; ${buildF2UQuadrantSurfaceCss(effectiveBoxShape!, el.borderColor, el.shapeCutPx)}; padding: ${Math.max(1, el.borderWidth)}px; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%; '}cursor: pointer;">
       <span style="width: 100%; height: 100%; flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; box-sizing: border-box; ${getPaddingCSS(el)}; ${innerBtnBg}">${el.content}</span>
     </a>`;
       }
-      return `<a href="${sanitizeHrefUrl(el.url, '#')}" class="${btnCls}" style="${baseStyle}; flex-direction: row; align-items: center; justify-content: center; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%; '}cursor: pointer;">
+      return `<a href="${btnHref}" target="${btnTarget}" rel="noopener noreferrer" class="${btnCls}" style="${baseStyle}; flex-direction: row; align-items: center; justify-content: center; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%; '}cursor: pointer;">
       <span>${el.content}</span>
     </a>`;
     }
@@ -1935,7 +1980,6 @@ ${nodesHtml}
       const innerContent = usesF2UPunch
         ? `<div style="position: relative; z-index: 2; flex: 1; display: flex; flex-direction: column; min-height: 0; width: 100%; height: 100%;">${rawBody}</div>`
         : rawBody;
-      wrapBoxLinkAfterGeo = Boolean(el.linkUrl && !el.collapsible);
       return `<div class="${classes}" style="${baseStyle}${flexDirOverride}${shapeClip}">${innerContent}</div>`;
     }
 
@@ -2029,15 +2073,16 @@ ${nodesHtml}
 
     case 'pure_link': {
       const target = el.linkTarget || '_blank';
+      const linkHref = sanitizeHrefUrl(el.linkUrl || el.url, '#');
       if (isBoxF2UGeo && hasUniformBorder && (!hasCustomBgSurface || isToyhouseFree)) {
         const innerLinkBg = buildF2UQuadrantSurfaceCss(
           effectiveBoxShape!,
           el.bgColor && el.bgColor !== 'transparent' ? el.bgColor : el.shapeMaskBgColor || '#FAF8F5',
           el.shapeCutPx
         );
-        return `<a href="${sanitizeHrefUrl(el.url, '#')}" target="${target}" rel="noopener noreferrer" class="${classes}" style="${baseStyle}; ${buildF2UQuadrantSurfaceCss(effectiveBoxShape!, el.borderColor, el.shapeCutPx)}; padding: ${Math.max(1, el.borderWidth)}px; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%;'}"><span style="width: 100%; height: 100%; flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; box-sizing: border-box; ${getPaddingCSS(el)}; ${innerLinkBg}">${faInlineIconHtml}<span>${el.content || 'Link'}</span></span></a>`;
+        return `<a href="${linkHref}" target="${target}" rel="noopener noreferrer" class="${classes}" style="${baseStyle}; ${buildF2UQuadrantSurfaceCss(effectiveBoxShape!, el.borderColor, el.shapeCutPx)}; padding: ${Math.max(1, el.borderWidth)}px; text-decoration: none; cursor: pointer; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%;'}"><span style="width: 100%; height: 100%; flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; box-sizing: border-box; ${getPaddingCSS(el)}; ${innerLinkBg}">${faInlineIconHtml}<span>${el.content || 'Link'}</span></span></a>`;
       }
-      return `<a href="${sanitizeHrefUrl(el.url, '#')}" target="${target}" rel="noopener noreferrer" class="${classes}" style="${baseStyle}; flex-direction: row; align-items: center; justify-content: center; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%;'}">${faInlineIconHtml}<span>${el.content || 'Link'}</span></a>`;
+      return `<a href="${linkHref}" target="${target}" rel="noopener noreferrer" class="${classes}" style="${baseStyle}; flex-direction: row; align-items: center; justify-content: center; text-decoration: none; cursor: pointer; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%;'}">${faInlineIconHtml}<span>${el.content || 'Link'}</span></a>`;
     }
 
     case 'pure_image_slot': {
@@ -2150,7 +2195,6 @@ ${nodesHtml}
         innerOutput = `<div class="${classes}" style="${baseStyle}">${usesF2UPunch ? `<div style="position: relative; z-index: 2; flex: 1; display: flex; flex-direction: column; width: 100%;">${boxBody}</div>` : boxBody}</div>`;
       }
 
-      wrapBoxLinkAfterGeo = Boolean(el.linkUrl && !el.collapsible);
       return innerOutput;
     }
   }

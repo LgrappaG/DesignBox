@@ -5,6 +5,7 @@ import {
   FlipVertical,
   Grid,
   Image as ImageIcon,
+  Link2,
   MousePointerClick,
   Network,
   Plus,
@@ -13,6 +14,7 @@ import {
   Sparkles,
   Trash2,
   UploadCloud,
+  X,
 } from 'lucide-react';
 import { FaIconBrowser } from '../shared/FaIconBrowser';
 import { StudioColorButton } from '../shared/StudioColorPicker';
@@ -100,6 +102,15 @@ const SUBCONTENT_EXCLUDED_TYPES = new Set([
   'moodboard',
 ]);
 
+const LINK_EXCLUDED_TYPES = new Set([
+  'tabs',
+  'pure_f2u_tabs',
+  'accordion',
+  'pure_spoiler',
+  'pure_collapse',
+  'social_links',
+]);
+
 function getSubContentLabel(type: DesignElement['type']): string {
   switch (type) {
     case 'stat_bar':
@@ -184,43 +195,105 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
         </label>
       )}
 
-      {(el.type === 'button' || el.type === 'pure_link') && (
-        <div className="grid grid-cols-[1fr_92px] gap-1.5">
-          <label className="block">
-            <span style={{ color: 'var(--text-muted)' }} className="block mb-1 text-[10px]">
-              Link Target URL (href)
-            </span>
-            <input
-              type="text"
-              placeholder="https://toyhou.se"
-              value={el.url || ''}
-              onChange={(e) => updateSelected({ url: e.target.value })}
+      {!LINK_EXCLUDED_TYPES.has(el.type) &&
+        !el.collapsible &&
+        el.f2uCollapseRole !== 'trigger' && (() => {
+          const isPrimaryUrlLink = el.type === 'button' || el.type === 'pure_link';
+          const isImageLike = el.type === 'image' || el.type === 'pure_image_slot';
+          const currentLinkValue = isPrimaryUrlLink
+            ? (el.linkUrl !== undefined ? el.linkUrl : el.url || '')
+            : el.linkUrl || '';
+          const handleLinkChange = (nextUrl: string) => {
+            if (isPrimaryUrlLink) {
+              updateSelected({ url: nextUrl, linkUrl: nextUrl });
+            } else if (isImageLike) {
+              updateSelected({
+                linkUrl: nextUrl,
+                clickAction: nextUrl.trim()
+                  ? 'link'
+                  : el.clickAction === 'link'
+                  ? 'none'
+                  : el.clickAction,
+              });
+            } else {
+              updateSelected({ linkUrl: nextUrl });
+            }
+          };
+          const handleClearLink = () => {
+            if (isPrimaryUrlLink) {
+              updateSelected({ url: '', linkUrl: '' });
+            } else if (isImageLike) {
+              updateSelected({
+                linkUrl: '',
+                ...(el.clickAction === 'link' ? { clickAction: 'none' as const } : {}),
+              });
+            } else {
+              updateSelected({ linkUrl: '' });
+            }
+          };
+          return (
+            <div
               style={{
-                backgroundColor: 'var(--bg-input)',
-                borderColor: 'var(--border-strong)',
+                backgroundColor: 'var(--bg-panel-alt)',
+                borderColor: currentLinkValue.trim() ? 'var(--accent)' : 'var(--border-main)',
               }}
-              className="w-full border rounded-[5px] px-2 py-1 text-[11px] font-mono"
-            />
-          </label>
-          <label className="block">
-            <span style={{ color: 'var(--text-muted)' }} className="block mb-1 text-[10px]">
-              Target
-            </span>
-            <select
-              value={el.linkTarget || '_blank'}
-              onChange={(e) => updateSelected({ linkTarget: e.target.value as '_blank' | '_self' })}
-              style={{
-                backgroundColor: 'var(--bg-input)',
-                borderColor: 'var(--border-strong)',
-              }}
-              className="w-full border rounded-[5px] px-1.5 py-1 text-[10px]"
+              className="p-2 rounded-[7px] border space-y-1.5"
             >
-              <option value="_blank">_blank</option>
-              <option value="_self">_self</option>
-            </select>
-          </label>
-        </div>
-      )}
+              <div className="flex items-center justify-between text-[10px]">
+                <span className="font-semibold flex items-center gap-1">
+                  <Link2 className="w-3 h-3" style={{ color: 'var(--accent)' }} />
+                  <span>Click Link (URL)</span>
+                </span>
+                <span className="text-[9px] font-mono opacity-65">F2U Safe &lt;a&gt;</span>
+              </div>
+              <div className="grid grid-cols-[1fr_84px] gap-1.5 items-center">
+                <div className="relative flex items-center">
+                  <input
+                    type="text"
+                    placeholder="https://toyhou.se/~..."
+                    value={currentLinkValue}
+                    onChange={(e) => handleLinkChange(e.target.value)}
+                    style={{
+                      backgroundColor: 'var(--bg-input)',
+                      borderColor: 'var(--border-strong)',
+                    }}
+                    className="w-full border rounded-[5px] pl-2 pr-6 py-1 text-[11px] font-mono"
+                  />
+                  {currentLinkValue.trim() && (
+                    <button
+                      type="button"
+                      onClick={handleClearLink}
+                      title="Remove link"
+                      style={{ color: 'var(--text-muted)' }}
+                      className="absolute right-1.5 p-0.5 rounded hover:text-red-400 transition"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+                <select
+                  aria-label="Link Target"
+                  value={el.linkTarget || '_blank'}
+                  onChange={(e) => updateSelected({ linkTarget: e.target.value as '_blank' | '_self' })}
+                  style={{
+                    backgroundColor: 'var(--bg-input)',
+                    borderColor: 'var(--border-strong)',
+                  }}
+                  className="w-full border rounded-[5px] px-1.5 py-1 text-[10px]"
+                  title="Open link in new tab (_blank) or same tab (_self)"
+                >
+                  <option value="_blank">New Tab (_blank)</option>
+                  <option value="_self">Same Tab (_self)</option>
+                </select>
+              </div>
+              {isImageLike && el.clickAction === 'lightbox' && (
+                <p className="text-[9.5px] opacity-75 leading-tight" style={{ color: 'var(--text-muted)' }}>
+                  Lightbox is active — entering a URL switches click action to Link.
+                </p>
+              )}
+            </div>
+          );
+        })()}
 
       {/* Interactive Tabs Editor */}
       {(el.type === 'tabs' || el.type === 'pure_f2u_tabs') && (
@@ -1361,17 +1434,38 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
               </div>
             )}
 
-            {el.clickAction === 'link' && (
-              <div className="space-y-0.5">
-                <span className="text-[10px] opacity-75">Target URL (opens on click)</span>
-                <input
-                  type="text"
-                  placeholder="https://..."
-                  value={el.linkUrl || ''}
-                  onChange={(e) => updateSelected({ linkUrl: e.target.value })}
-                  style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                  className="w-full border rounded-[5px] px-2 py-1 text-[10px] font-mono"
-                />
+            {(el.clickAction === 'link' ||
+              (el.clickAction !== 'lightbox' && Boolean(el.linkUrl && el.linkUrl.trim()))) && (
+              <div className="grid grid-cols-[1fr_84px] gap-1.5 items-end">
+                <label className="block space-y-0.5">
+                  <span className="text-[10px] opacity-75">Target URL (opens on click)</span>
+                  <input
+                    type="text"
+                    placeholder="https://..."
+                    value={el.linkUrl || ''}
+                    onChange={(e) => {
+                      const nextUrl = e.target.value;
+                      updateSelected({
+                        linkUrl: nextUrl,
+                        clickAction: nextUrl.trim() ? 'link' : 'none',
+                      });
+                    }}
+                    style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+                    className="w-full border rounded-[5px] px-2 py-1 text-[10px] font-mono"
+                  />
+                </label>
+                <label className="block space-y-0.5">
+                  <span className="text-[10px] opacity-75">Target</span>
+                  <select
+                    value={el.linkTarget || '_blank'}
+                    onChange={(e) => updateSelected({ linkTarget: e.target.value as '_blank' | '_self' })}
+                    style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+                    className="w-full border rounded-[5px] px-1.5 py-1 text-[10px]"
+                  >
+                    <option value="_blank">_blank</option>
+                    <option value="_self">_self</option>
+                  </select>
+                </label>
               </div>
             )}
 

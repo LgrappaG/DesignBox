@@ -1,4 +1,4 @@
-import { DesignElement, ElementType, LayoutMode } from '../types/schema';
+import { DesignElement, ElementType, LayoutMode, UiTheme } from '../types/schema';
 
 export type ShortcutActionId =
   | 'tool_select'
@@ -59,6 +59,8 @@ export interface CuteThemeColors {
   accentSecondary: string;
   textMain: string;
   textMuted: string;
+  rulerBg: string;
+  rulerTick: string;
 }
 
 export const DEFAULT_CUTE_THEME_COLORS: CuteThemeColors = {
@@ -71,6 +73,8 @@ export const DEFAULT_CUTE_THEME_COLORS: CuteThemeColors = {
   accentSecondary: '#A855F7',
   textMain: '#3B234A',
   textMuted: '#8B6F9C',
+  rulerBg: '#F3E8FF',
+  rulerTick: '#8B6F9C',
 };
 
 export const CUTE_THEME_PRESETS: ReadonlyArray<{
@@ -96,6 +100,8 @@ export const CUTE_THEME_PRESETS: ReadonlyArray<{
       accentSecondary: '#E85D8C',
       textMain: '#4A3540',
       textMuted: '#997486',
+      rulerBg: '#FCEBF2',
+      rulerTick: '#997486',
     },
   },
   {
@@ -111,6 +117,8 @@ export const CUTE_THEME_PRESETS: ReadonlyArray<{
       accentSecondary: '#14B8A6',
       textMain: '#233D38',
       textMuted: '#63857E',
+      rulerBg: '#E6F7F1',
+      rulerTick: '#63857E',
     },
   },
 ];
@@ -147,10 +155,75 @@ export function buildCuteThemeCssVars(colors: CuteThemeColors): Record<string, s
     '--accent': colors.accentPrimary,
     '--accent-hover': colors.accentSecondary,
     '--accent-soft': hexToRgba(colors.accentPrimary, 0.14),
-    '--ruler-bg': colors.bgPanelAlt,
-    '--ruler-tick': colors.textMuted,
+    '--ruler-bg': colors.rulerBg || colors.bgPanelAlt,
+    '--ruler-tick': colors.rulerTick || colors.textMuted,
     '--grid-dot': hexToRgba(colors.accentSecondary, 0.24),
   };
+}
+
+export interface ResolvedRulerPalette {
+  rulerBg: string;
+  tickColor: string;
+  textColor: string;
+  accentColor: string;
+  spanHighlight: string;
+}
+
+export function resolveRulerPalette(
+  uiTheme: UiTheme,
+  cuteColors: CuteThemeColors = DEFAULT_CUTE_THEME_COLORS
+): ResolvedRulerPalette {
+  if (uiTheme === 'carbon') {
+    return {
+      rulerBg: '#1E1D1B',
+      tickColor: '#524E48',
+      textColor: '#948E84',
+      accentColor: '#D97757',
+      spanHighlight: 'rgba(217, 119, 87, 0.11)',
+    };
+  }
+  if (uiTheme === 'paper') {
+    return {
+      rulerBg: '#EAE5D9',
+      tickColor: '#A39B8B',
+      textColor: '#78736A',
+      accentColor: '#C86D51',
+      spanHighlight: 'rgba(200, 109, 81, 0.08)',
+    };
+  }
+  const rBg = cuteColors.rulerBg || cuteColors.bgPanelAlt;
+  const rTick = cuteColors.rulerTick || cuteColors.textMuted;
+  return {
+    rulerBg: rBg,
+    tickColor: rTick,
+    textColor: cuteColors.textMuted || rTick,
+    accentColor: cuteColors.accentPrimary,
+    spanHighlight: hexToRgba(cuteColors.accentPrimary, 0.11),
+  };
+}
+
+export function applyStudioThemeToDocument(
+  uiTheme: UiTheme,
+  cuteColors: CuteThemeColors
+): void {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  root.setAttribute('data-theme', uiTheme);
+  const vars = buildCuteThemeCssVars(cuteColors);
+  if (uiTheme === 'cute') {
+    for (const [key, val] of Object.entries(vars)) {
+      root.style.setProperty(key, val);
+    }
+  } else {
+    for (const key of Object.keys(vars)) {
+      root.style.removeProperty(key);
+    }
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('dbx-theme-vars-updated', { detail: { uiTheme, cuteColors } })
+    );
+  }
 }
 
 export interface StudioPreferences {
@@ -356,6 +429,18 @@ export function loadStudioPreferences(): StudioPreferences {
           typeof parsed.cuteThemeColors?.textMuted === 'string'
             ? parsed.cuteThemeColors.textMuted
             : DEFAULT_CUTE_THEME_COLORS.textMuted,
+        rulerBg:
+          typeof parsed.cuteThemeColors?.rulerBg === 'string'
+            ? parsed.cuteThemeColors.rulerBg
+            : typeof parsed.cuteThemeColors?.bgPanelAlt === 'string'
+            ? parsed.cuteThemeColors.bgPanelAlt
+            : DEFAULT_CUTE_THEME_COLORS.rulerBg,
+        rulerTick:
+          typeof parsed.cuteThemeColors?.rulerTick === 'string'
+            ? parsed.cuteThemeColors.rulerTick
+            : typeof parsed.cuteThemeColors?.textMuted === 'string'
+            ? parsed.cuteThemeColors.textMuted
+            : DEFAULT_CUTE_THEME_COLORS.rulerTick,
       },
     };
   } catch {

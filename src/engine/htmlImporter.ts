@@ -129,6 +129,30 @@ function extractBgImageUrl(raw: string | undefined): string | undefined {
   return m ? m[1].trim() : undefined;
 }
 
+function findAncestorAnchor(el: Element | null, stopAt?: Element | null): Element | null {
+  let cur = el ? el.parentElement : null;
+  while (cur && cur !== stopAt) {
+    if (cur.tagName.toLowerCase() === 'a') return cur;
+    cur = cur.parentElement;
+  }
+  return null;
+}
+
+function extractAnchorLinkMeta(anchorEl: Element | null): {
+  linkUrl?: string;
+  linkTarget?: '_blank' | '_self';
+} {
+  if (!anchorEl) return {};
+  if (anchorEl.getAttribute('data-toggle')) return {};
+  const href = (anchorEl.getAttribute('href') || '').trim();
+  if (!href || href === '#') return {};
+  const rawTarget = (anchorEl.getAttribute('target') || '').trim().toLowerCase();
+  return {
+    linkUrl: href,
+    linkTarget: rawTarget === '_self' ? '_self' : '_blank',
+  };
+}
+
 export function extractHexSwatchesFromHtml(rawHtml: string): string[] {
   const matches = rawHtml.match(/#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/g) || [];
   const normalized = new Map<string, string>();
@@ -463,24 +487,71 @@ export function parseToyhouseHtmlToDesign(
     const textLen = (node.textContent || '').trim().length;
     if (directImgs.length === 1 && textLen < 24 && !node.querySelector('.row, .nav-tabs, table')) {
       const imgEl = directImgs[0];
+      const imgAnchor = tag === 'a' ? node : findAncestorAnchor(imgEl, node) || node.querySelector('a[href]');
+      const linkMeta = extractAnchorLinkMeta(imgAnchor);
       const converted = convertLeafNode(imgEl, rowIndex, colSpan, x, y, width);
       return {
         ...applyCommonInlineCssToElement(converted, node),
         url: imgEl.getAttribute('src') || converted.url,
+        ...(linkMeta.linkUrl
+          ? {
+              linkUrl: linkMeta.linkUrl,
+              linkTarget: linkMeta.linkTarget,
+              clickAction: 'link' as const,
+            }
+          : {}),
       };
     }
 
-    // Background image div with minimal text
-    const bgUrl = extractBgImageUrl(css['background-image'] || css['background']);
+    // Background image div with minimal text (directly on node or inside wrapped DesignBox img div)
+    const directBgUrl = extractBgImageUrl(css['background-image'] || css['background']);
+    const nestedBgEl =
+      !directBgUrl && textLen < 30 && !node.querySelector('.row, .card, .nav-tabs')
+        ? Array.from(node.querySelectorAll('[style*="background"]')).find((el) => {
+            const elCss = parseInlineStyles(el.getAttribute('style'));
+            return Boolean(extractBgImageUrl(elCss['background-image'] || elCss['background']));
+          }) || null
+        : null;
+    const nestedBgCss = nestedBgEl ? parseInlineStyles(nestedBgEl.getAttribute('style')) : null;
+    const bgUrl =
+      directBgUrl ||
+      (nestedBgCss ? extractBgImageUrl(nestedBgCss['background-image'] || nestedBgCss['background']) : undefined);
     if (bgUrl && textLen < 30 && !node.querySelector('.row, .card, .nav-tabs')) {
       breakdown.images += 1;
-      const base = createFromType('image', rowIndex, colSpan, x, y, width, parsePxNumber(css['height']) || 180);
-      const isCircle = /\brounded-circle\b/.test(cls) || (css['border-radius'] || '').includes('50%');
+      const imgAnchor =
+        tag === 'a'
+          ? node
+          : findAncestorAnchor(nestedBgEl, node) || node.querySelector('a[href]');
+      const linkMeta = extractAnchorLinkMeta(imgAnchor);
+      const bgBaseEl = nestedBgEl || node;
+      const bgCls = bgBaseEl.className || cls;
+      const bgCss = nestedBgCss || css;
+      const base = createFromType(
+        'image',
+        rowIndex,
+        colSpan,
+        x,
+        y,
+        width,
+        parsePxNumber(css['height'] || bgCss['height']) || 180
+      );
+      const isCircle =
+        /\brounded-circle\b/.test(cls) ||
+        /\brounded-circle\b/.test(bgCls) ||
+        (css['border-radius'] || '').includes('50%') ||
+        (bgCss['border-radius'] || '').includes('50%');
       return {
         ...applyCommonInlineCssToElement(base, node),
         label: 'Imported Background Image',
         url: bgUrl,
         imageShape: isCircle ? 'circle' : 'rect',
+        ...(linkMeta.linkUrl
+          ? {
+              linkUrl: linkMeta.linkUrl,
+              linkTarget: linkMeta.linkTarget,
+              clickAction: 'link' as const,
+            }
+          : {}),
       };
     }
 
@@ -517,13 +588,49 @@ export function parseToyhouseHtmlToDesign(
     // 4. Button / Link CTA
     if (tag === 'a' && (/\bbtn\b/.test(cls) || Boolean(css['background'] || css['background-color']))) {
       breakdown.buttons += 1;
+      const href = node.getAttribute('href') || '#';
+      const linkMeta = extractAnchorLinkMeta(node);
       const base = createFromType('button', rowIndex, colSpan, x, y, Math.min(width, 220), 42);
       return {
         ...applyCommonInlineCssToElement(base, node),
         label: node.textContent?.trim() || 'Link Button',
         content: node.textContent?.trim() || 'LINK',
-        linkUrl: node.getAttribute('href') || '#',
+        url: href,
+        linkUrl: href,
+        linkTarget: linkMeta.linkTarget || '_blank',
       };
+    }
+
+    // 4a. Linked single child wrapper (<a href="..."><div ...></div></a>) or standalone link
+    if (tag === 'a' && !node.hasAttribute('data-toggle')) {
+      const linkMeta = extractAnchorLinkMeta(node);
+      if (node.children.length === 1) {
+        const innerConverted = convertLeafNode(node.children[0], rowIndex, colSpan, x, y, width);
+        return {
+          ...innerConverted,
+          ...(linkMeta.linkUrl
+            ? {
+                linkUrl: linkMeta.linkUrl,
+                linkTarget: linkMeta.linkTarget,
+                ...(innerConverted.type === 'image' || innerConverted.type === 'pure_image_slot'
+                  ? { clickAction: 'link' as const }
+                  : {}),
+              }
+            : {}),
+        };
+      }
+      if (linkMeta.linkUrl && textLen > 0) {
+        breakdown.buttons += 1;
+        const base = createFromType('pure_link', rowIndex, colSpan, x, y, Math.min(width, 220), 42);
+        return {
+          ...applyCommonInlineCssToElement(base, node),
+          label: node.textContent?.trim() || 'Imported Link',
+          content: node.textContent?.trim() || 'Link',
+          url: linkMeta.linkUrl,
+          linkUrl: linkMeta.linkUrl,
+          linkTarget: linkMeta.linkTarget || '_blank',
+        };
+      }
     }
 
     // 4b. Bootstrap Progress Bar (.progress / .progress-bar) -> pure_progress
@@ -849,6 +956,13 @@ export function parseToyhouseHtmlToDesign(
         const rowChildren = Array.from(node.children).filter(
           (ch) => ch.tagName.toLowerCase() !== 'br'
         );
+        if (
+          rowChildren.length > 0 &&
+          rowChildren.every((ch) => ch.classList.contains('row'))
+        ) {
+          processNodeList(rowChildren);
+          continue;
+        }
         if (rowChildren.length > 0) {
           breakdown.rows += 1;
 
@@ -945,6 +1059,7 @@ export function parseToyhouseHtmlToDesign(
             } else if (
               innerChildren.length === 1 &&
               (innerChildren[0].classList.contains('card') ||
+                innerChildren[0].tagName.toLowerCase() === 'a' ||
                 innerChildren[0].tagName.toLowerCase() === 'img' ||
                 innerChildren[0].classList.contains('nav-tabs') ||
                 innerChildren[0].classList.contains('progress') ||

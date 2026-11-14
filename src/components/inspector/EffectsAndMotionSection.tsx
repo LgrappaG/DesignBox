@@ -165,13 +165,31 @@ export const EffectsAndMotionSection: React.FC<EffectsAndMotionSectionProps> = (
 
         <label className="block">
           <span style={{ color: 'var(--text-muted)' }} className="block mb-0.5 text-[10px]">
-            Card Click Link (Clicking box navigates to URL)
+            Card Click Link (Clicking object navigates to URL)
           </span>
           <input
             type="text"
             placeholder="e.g. https://toyhou.se/~gallery or https://carrd.co"
-            value={el.linkUrl || ''}
-            onChange={(e) => updateSelected({ linkUrl: e.target.value })}
+            value={
+              el.type === 'button' || el.type === 'pure_link'
+                ? el.linkUrl !== undefined
+                  ? el.linkUrl
+                  : el.url || ''
+                : el.linkUrl || ''
+            }
+            onChange={(e) => {
+              const nextUrl = e.target.value;
+              if (el.type === 'image' || el.type === 'pure_image_slot') {
+                updateSelected({
+                  linkUrl: nextUrl,
+                  clickAction: nextUrl.trim() ? 'link' : 'none',
+                });
+              } else if (el.type === 'button' || el.type === 'pure_link') {
+                updateSelected({ url: nextUrl, linkUrl: nextUrl });
+              } else {
+                updateSelected({ linkUrl: nextUrl });
+              }
+            }}
             style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
             className="w-full border rounded-[5px] px-2 py-1 text-[11px] font-mono text-emerald-500"
           />

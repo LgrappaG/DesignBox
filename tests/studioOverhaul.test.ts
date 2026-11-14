@@ -1,9 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { installNodeDomParser } from './helpers/nodeDomParser';
+
+installNodeDomParser();
+
 import { searchStudioCatalog } from '../src/data/searchCatalog';
 import { parseToyhouseHtmlToDesign } from '../src/engine/htmlImporter';
 import { getElementF2UShieldReport } from '../src/engine/f2uShield';
-import { generatePlatformExport } from '../src/engine/layoutSolver';
+import {
+  generatePlatformExport,
+  getElementEffectiveLinkUrl,
+} from '../src/engine/layoutSolver';
 import { DesignElement } from '../src/types/schema';
 import { buildDefaultElement } from '../src/utils/elementFactory';
 import { buildF2UAngledLineCss, buildF2URadialCutoutCss } from '../src/utils/f2uShapeCss';
@@ -14,6 +21,7 @@ import {
   DEFAULT_STUDIO_PREFERENCES,
   extractDesignImageUrls,
   matchesShortcut,
+  resolveRulerPalette,
   SHORTCUT_PROFILES,
 } from '../src/utils/studioSettings';
 
@@ -250,19 +258,47 @@ test('studioSettings provides freeform/transparent defaults, profiles, and exact
   );
 });
 
-test('cute theme customizer defaults, CSS vars, element defaults, and Toyhouse image extraction work cleanly', () => {
+test('cute theme customizer defaults, CSS vars, ruler palettes, element defaults, and Toyhouse image extraction work cleanly', () => {
   assert.equal(DEFAULT_CUTE_THEME_COLORS.bgApp, '#FAF5FF');
   assert.equal(DEFAULT_CUTE_THEME_COLORS.accentPrimary, '#EC4899');
   assert.equal(DEFAULT_CUTE_THEME_COLORS.accentSecondary, '#A855F7');
+  assert.equal(DEFAULT_CUTE_THEME_COLORS.rulerBg, '#F3E8FF');
+  assert.equal(DEFAULT_CUTE_THEME_COLORS.rulerTick, '#8B6F9C');
 
   const vars = buildCuteThemeCssVars({
     ...DEFAULT_CUTE_THEME_COLORS,
     accentPrimary: '#FF6B9E',
+    rulerBg: '#1F1B24',
+    rulerTick: '#E2D4F0',
   });
   assert.equal(vars['--bg-app'], '#FAF5FF');
   assert.equal(vars['--accent'], '#FF6B9E');
   assert.equal(vars['--accent-soft'], 'rgba(255, 107, 158, 0.14)');
   assert.equal(vars['--grid-dot'], 'rgba(168, 85, 247, 0.24)');
+  assert.equal(vars['--ruler-bg'], '#1F1B24');
+  assert.equal(vars['--ruler-tick'], '#E2D4F0');
+
+  const carbonRuler = resolveRulerPalette('carbon');
+  assert.equal(carbonRuler.rulerBg, '#1E1D1B');
+  assert.equal(carbonRuler.tickColor, '#524E48');
+  assert.equal(carbonRuler.accentColor, '#D97757');
+
+  const paperRuler = resolveRulerPalette('paper');
+  assert.equal(paperRuler.rulerBg, '#EAE5D9');
+  assert.equal(paperRuler.tickColor, '#A39B8B');
+  assert.equal(paperRuler.accentColor, '#C86D51');
+
+  const cuteRuler = resolveRulerPalette('cute', {
+    ...DEFAULT_CUTE_THEME_COLORS,
+    rulerBg: '#2A1E30',
+    rulerTick: '#F472B6',
+    textMuted: '#D8B4FE',
+    accentPrimary: '#EC4899',
+  });
+  assert.equal(cuteRuler.rulerBg, '#2A1E30');
+  assert.equal(cuteRuler.tickColor, '#F472B6');
+  assert.equal(cuteRuler.textColor, '#D8B4FE');
+  assert.equal(cuteRuler.accentColor, '#EC4899');
 
   const cuteBox = buildDefaultElement('box', [], 'cute', null);
   assert.equal(cuteBox.bgColor, '#FDF8FF');
@@ -307,4 +343,164 @@ test('cute theme customizer defaults, CSS vars, element defaults, and Toyhouse i
     'https://example.com/art2.webp',
     'https://example.com/rel.png',
   ]);
+});
+
+test('Universal object & image links resolve, export safely in F2U/Premium without nested anchors, and round-trip via DOM import', () => {
+  // 1. Helper resolution
+  const linkedImgDefaultClick = makeBaseElement({
+    id: 'img-link-default',
+    type: 'image',
+    url: 'https://example.com/art.png',
+    clickAction: 'none',
+    linkUrl: 'https://toyhou.se/char-1',
+    linkTarget: '_self',
+  });
+  assert.equal(getElementEffectiveLinkUrl(linkedImgDefaultClick), 'https://toyhou.se/char-1');
+
+  const lightboxImg = makeBaseElement({
+    id: 'img-lb',
+    type: 'image',
+    url: 'https://example.com/art.png',
+    clickAction: 'lightbox',
+    linkUrl: 'https://toyhou.se/ignored',
+  });
+  assert.equal(getElementEffectiveLinkUrl(lightboxImg), null);
+
+  const btnEl = makeBaseElement({
+    id: 'btn-1',
+    type: 'button',
+    url: 'https://toyhou.se/~bulletins',
+    content: 'Bulletins',
+  });
+  assert.equal(getElementEffectiveLinkUrl(btnEl), 'https://toyhou.se/~bulletins');
+
+  const stickerEl = makeBaseElement({
+    id: 'stk-1',
+    type: 'sticker',
+    stickerIcon: '✦',
+    content: 'Sticker Link',
+    linkUrl: 'https://example.com/sticker',
+    linkTarget: '_blank',
+  });
+  const badgeEl = makeBaseElement({
+    id: 'bdg-1',
+    type: 'badge',
+    content: 'COMMISSIONS OPEN',
+    linkUrl: 'https://example.com/commissions',
+    linkTarget: '_self',
+  });
+  const pagedollEl = makeBaseElement({
+    id: 'pd-1',
+    type: 'pagedoll',
+    url: 'https://example.com/doll.png',
+    linkUrl: 'https://example.com/doll-credit',
+  });
+  const headingEl = makeBaseElement({
+    id: 'hd-1',
+    type: 'pure_heading',
+    content: 'Linked Heading',
+    linkUrl: 'https://example.com/heading',
+  });
+  const boxEl = makeBaseElement({
+    id: 'bx-1',
+    type: 'pure_box',
+    content: 'Linked Box',
+    linkUrl: 'https://example.com/box',
+  });
+  const collapsibleBox = makeBaseElement({
+    id: 'col-1',
+    type: 'box',
+    collapsible: true,
+    content: 'Spoiler',
+    linkUrl: 'https://example.com/should-not-wrap',
+  });
+  assert.equal(getElementEffectiveLinkUrl(stickerEl), 'https://example.com/sticker');
+  assert.equal(getElementEffectiveLinkUrl(collapsibleBox), null);
+
+  // 2. Dual-mode export for universal linked objects
+  const linkedElements = [
+    linkedImgDefaultClick,
+    stickerEl,
+    badgeEl,
+    pagedollEl,
+    headingEl,
+    boxEl,
+  ];
+  for (const platform of ['toyhouse_free', 'toyhouse_premium'] as const) {
+    const exp = generatePlatformExport(linkedElements, 'freeform', platform, 760, 540);
+    assert.match(exp.html, /href="https:\/\/toyhou\.se\/char-1"\s+target="_self"/);
+    assert.match(exp.html, /href="https:\/\/example\.com\/sticker"\s+target="_blank"/);
+    assert.match(exp.html, /href="https:\/\/example\.com\/commissions"\s+target="_self"/);
+    assert.match(exp.html, /href="https:\/\/example\.com\/doll-credit"/);
+    assert.match(exp.html, /href="https:\/\/example\.com\/heading"/);
+    assert.match(exp.html, /href="https:\/\/example\.com\/box"/);
+    if (platform === 'toyhouse_free') {
+      assert.equal(exp.html.includes('<style'), false);
+    }
+  }
+
+  // 3. Container box with linkUrl containing a child button must keep child <a> intact without nested <a><a
+  const parentBox = makeBaseElement({
+    id: 'parent-box',
+    type: 'box',
+    content: 'Container With Child CTA',
+    linkUrl: 'https://example.com/outer-skipped',
+  });
+  const childBtn = makeBaseElement({
+    id: 'child-btn',
+    type: 'button',
+    parentId: 'parent-box',
+    content: 'Inner CTA',
+    url: 'https://example.com/inner-cta',
+    linkTarget: '_blank',
+  });
+  const nestedExport = generatePlatformExport([parentBox, childBtn], 'block', 'toyhouse_free', 760, 540);
+  assert.equal(nestedExport.html.includes('href="https://example.com/inner-cta"'), true);
+  assert.equal(nestedExport.html.includes('href="https://example.com/outer-skipped"'), false);
+
+  // 4. DOM round-trip import without DBX_ROUNDTRIP_V1 comment for linked images (f2u_bg & native_img) and linked box
+  const nativeImg = makeBaseElement({
+    id: 'img-native',
+    type: 'image',
+    imageRenderMode: 'native_img',
+    url: 'https://example.com/native.png',
+    clickAction: 'link',
+    linkUrl: 'https://example.com/native-target',
+    linkTarget: '_self',
+  });
+  const blockExp = generatePlatformExport(
+    [linkedImgDefaultClick, nativeImg, boxEl],
+    'block',
+    'toyhouse_free',
+    760,
+    540
+  );
+  const strippedHtml = blockExp.html.replace(/<!--[\s\S]*?-->/g, '');
+  const domImported = parseToyhouseHtmlToDesign(strippedHtml, {
+    uiTheme: 'paper',
+    canvasWidth: 760,
+    startRowIndex: 0,
+    startY: 24,
+  });
+
+  const importedBgImg = domImported.elements.find((e) => e.url === 'https://example.com/art.png');
+  assert.ok(
+    importedBgImg,
+    `Expected background-image linked image to import from raw HTML. Got: ${JSON.stringify(
+      domImported.elements.map((e) => ({ type: e.type, url: e.url, linkUrl: e.linkUrl, label: e.label }))
+    )}`
+  );
+  assert.equal(importedBgImg.linkUrl, 'https://toyhou.se/char-1');
+  assert.equal(importedBgImg.linkTarget, '_self');
+  assert.equal(importedBgImg.clickAction, 'link');
+
+  const importedNativeImg = domImported.elements.find((e) => e.url === 'https://example.com/native.png');
+  assert.ok(importedNativeImg, 'Expected native <img> linked image to import from raw HTML');
+  assert.equal(importedNativeImg.linkUrl, 'https://example.com/native-target');
+  assert.equal(importedNativeImg.linkTarget, '_self');
+  assert.equal(importedNativeImg.clickAction, 'link');
+
+  const importedLinkedBox = domImported.elements.find((e) => e.linkUrl === 'https://example.com/box');
+  assert.ok(importedLinkedBox, 'Expected linked non-image object wrapper <a href> to preserve linkUrl on DOM import');
+  assert.equal(importedLinkedBox.linkTarget, '_blank');
 });

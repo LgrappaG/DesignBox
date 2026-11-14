@@ -19,7 +19,7 @@ import {
 import { BgPattern, DesignElement, LayoutMode } from '../../types/schema';
 import { StudioColorButton } from '../shared/StudioColorPicker';
 
-const CANVAS_SIZE_PRESETS: ReadonlyArray<{ id: string; label: string; w: number; h: number }> = [
+export const CANVAS_SIZE_PRESETS: ReadonlyArray<{ id: string; label: string; w: number; h: number }> = [
   { id: 'standard', label: 'Standard Freeform (760×540)', w: 760, h: 540 },
   { id: 'compact', label: 'Compact Character Card (600×420)', w: 600, h: 420 },
   { id: 'wide', label: 'Wide World / Banner (900×640)', w: 900, h: 640 },
