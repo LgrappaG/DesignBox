@@ -5,20 +5,21 @@ import {
   CustomWidgetBlueprint,
   DesignElement,
   ElementType,
+  UiTheme,
 } from '../types/schema';
 
 export function buildDefaultElement(
   type: ElementType,
   elements: DesignElement[],
-  uiTheme: 'carbon' | 'paper',
+  uiTheme: UiTheme,
   editingContainer: DesignElement | null
 ): DesignElement {
   const id = `el-${Date.now().toString().slice(-4)}`;
   const maxRow = elements.reduce((m, e) => Math.max(m, e.rowIndex), 0);
-  const isLight = uiTheme === 'paper';
-  const cardBg = isLight ? '#F2EFE9' : '#242220';
-  const cardText = isLight ? '#2C2A28' : '#ECE7DF';
-  const cardBorder = isLight ? '#C86D51' : '#B85D3B';
+  const isLight = uiTheme !== 'carbon';
+  const cardBg = uiTheme === 'cute' ? '#FDF8FF' : isLight ? '#F2EFE9' : '#242220';
+  const cardText = uiTheme === 'cute' ? '#3B234A' : isLight ? '#2C2A28' : '#ECE7DF';
+  const cardBorder = uiTheme === 'cute' ? '#EC4899' : isLight ? '#C86D51' : '#B85D3B';
 
   const defaults: Record<ElementType, Partial<DesignElement>> = {
     box: {
@@ -574,7 +575,7 @@ export function buildDefaultElement(
 export function buildBlueprintInstanceElement(
   bp: CustomWidgetBlueprint,
   elements: DesignElement[],
-  uiTheme: 'carbon' | 'paper'
+  uiTheme: UiTheme
 ): DesignElement {
   const id = `cw-${Date.now().toString().slice(-4)}`;
   const maxRow = elements.reduce((m, e) => Math.max(m, e.rowIndex), 0);
@@ -582,7 +583,7 @@ export function buildBlueprintInstanceElement(
   (bp.customPropDefs || []).forEach((p) => {
     defaultPropsMap[p.key] = p.defaultValue;
   });
-  const isLight = uiTheme === 'paper';
+  const isLight = uiTheme !== 'carbon';
 
   return {
     id,
@@ -626,7 +627,7 @@ export function buildBlueprintInstanceElement(
 export function buildElementFromAssetPreset(
   preset: AssetPreset,
   elements: DesignElement[],
-  uiTheme: 'carbon' | 'paper',
+  uiTheme: UiTheme,
   editingContainer: DesignElement | null
 ): DesignElement {
   const base = buildDefaultElement(preset.type, elements, uiTheme, editingContainer);
@@ -653,7 +654,7 @@ export function buildElementFromFaIcon(
   iconLabel: string,
   mode: 'watermark' | 'badge',
   elements: DesignElement[],
-  uiTheme: 'carbon' | 'paper',
+  uiTheme: UiTheme,
   editingContainer: DesignElement | null
 ): DesignElement {
   const base = buildDefaultElement(

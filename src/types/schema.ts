@@ -1,5 +1,7 @@
 export type LayoutMode = 'hybrid' | 'block' | 'freeform';
 
+export type UiTheme = 'carbon' | 'paper' | 'cute';
+
 export type TargetPlatform =
   | 'toyhouse_free'
   | 'toyhouse_premium'
@@ -602,7 +604,7 @@ export interface ExportResult {
   };
 }
 
-export type PreviewSurface = 'th_dark' | 'th_light' | 'th_pink' | 'th_teal' | 'paper';
+export type PreviewSurface = 'th_dark' | 'th_light' | 'th_pink' | 'th_teal' | 'th_cute' | 'paper';
 
 export type PreviewViewport = 'full' | 'th_desktop' | 'th_col' | 'mobile';
 

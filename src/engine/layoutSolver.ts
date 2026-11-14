@@ -19,11 +19,23 @@ import {
 } from './modifierRenderer';
 import { isF2USafeShape, maskElementForF2USimulation } from './f2uShield';
 import {
+  buildF2UAngledLineCss,
   buildF2UCornerMaskOverlayCss,
   buildF2UQuadrantSurfaceCss,
+  buildF2URadialCutoutCss,
   isF2UGeometricShape,
   normalizeShapeCutPx,
 } from '../utils/f2uShapeCss';
+
+function encodeRoundTripPayload(payload: unknown): string {
+  const json = JSON.stringify(payload);
+  const bytes = new TextEncoder().encode(json);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 1) {
+    bin += String.fromCharCode(bytes[i]);
+  }
+  return btoa(bin);
+}
 
 export interface SolvedRow {
   rowIndex: number;
@@ -803,12 +815,50 @@ export function renderInnerElementHTML(
       : 'none';
   const boxClipCss = boxClipExpr !== 'none' ? `clip-path: ${boxClipExpr}` : '';
 
+  const f2uRadialShape =
+    isToyhouseFree &&
+    !isImageWithUrl &&
+    !hasCustomBgSurface &&
+    !usesF2UPunch &&
+    (rawEl.boxClipShape === 'ticket' ||
+      rawEl.boxClipShape === 'cross_star' ||
+      rawEl.boxClipShape === 'scallop')
+      ? rawEl.boxClipShape
+      : null;
+
+  const f2uFaVectorShape =
+    isToyhouseFree &&
+    !isImageWithUrl &&
+    !usesF2UPunch &&
+    (rawEl.boxClipShape === 'star' ||
+      rawEl.boxClipShape === 'heart' ||
+      rawEl.boxClipShape === 'shield')
+      ? rawEl.boxClipShape
+      : null;
+
+  const f2uFaVectorIconClass =
+    f2uFaVectorShape === 'star'
+      ? 'fas fa-star'
+      : f2uFaVectorShape === 'heart'
+      ? 'fas fa-heart'
+      : f2uFaVectorShape === 'shield'
+      ? 'fas fa-shield-alt'
+      : '';
+
+  const f2uFaVectorOverlayHtml = f2uFaVectorShape
+    ? `      <div style="position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0;"><i class="${f2uFaVectorIconClass}" style="font-size: ${Math.max(24, Math.round(Math.min(el.width, el.height) * 0.9))}px; color: ${el.bgColor && el.bgColor !== 'transparent' ? el.bgColor : el.borderColor}; line-height: 1;"></i></div>`
+    : '';
+
   const surfaceBgCss = usesF2UPunch
     ? 'background-color: transparent'
     : hasImgGeoBorder
     ? buildF2UQuadrantSurfaceCss(activeImageShape!, el.borderColor, el.shapeCutPx)
     : isF2UGeoImage && isStandardImgFrame
     ? 'background-color: transparent'
+    : f2uFaVectorShape
+    ? 'background-color: transparent'
+    : f2uRadialShape
+    ? buildF2URadialCutoutCss(f2uRadialShape, el.bgColor, el.shapeMaskBgColor || 'transparent')
     : geoUseQuadrantFill
     ? buildF2UQuadrantSurfaceCss(
         effectiveBoxShape!,
@@ -822,7 +872,9 @@ export function renderInnerElementHTML(
     : getSurfaceBackgroundCSS(el);
 
   const effectiveBorderCss =
-    (isBoxF2UGeo && (geoUseQuadrantFill || isToyhouseFree)) || (isF2UGeoImage && isStandardImgFrame)
+    f2uFaVectorShape ||
+    (isBoxF2UGeo && (geoUseQuadrantFill || isToyhouseFree)) ||
+    (isF2UGeoImage && isStandardImgFrame)
       ? 'border: none'
       : getBorderCSS(el);
 
@@ -932,6 +984,18 @@ export function renderInnerElementHTML(
 
   const finalizeElementHTML = (rawHtml: string): string => {
     let out = rawHtml;
+    if (f2uFaVectorOverlayHtml) {
+      const firstTagEnd = out.indexOf('>');
+      const lastCloseIdx =
+        out.lastIndexOf('</div>') !== -1 ? out.lastIndexOf('</div>') : out.lastIndexOf('</a>');
+      if (firstTagEnd !== -1 && lastCloseIdx > firstTagEnd) {
+        const innerBody = out.slice(firstTagEnd + 1, lastCloseIdx);
+        out =
+          out.slice(0, firstTagEnd + 1) +
+          `\n${f2uFaVectorOverlayHtml}\n<div style="position: relative; z-index: 1; width: 100%;">${innerBody}</div>` +
+          out.slice(lastCloseIdx);
+      }
+    }
     if (f2uPunchHtml || overlaysHtml || geoCornerOverlayHtml) {
       const insertClose = out.lastIndexOf('</div>') !== -1 ? '</div>' : '</a>';
       const idx = out.lastIndexOf(insertClose);
@@ -1714,12 +1778,16 @@ ${nodesHtml}
         !isToyhouseFree && el.type === 'pure_star'
           ? '; clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)'
           : '';
+      const f2uStarBg =
+        isToyhouseFree && el.type === 'pure_star'
+          ? `<div style="position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0;"><i class="fa-solid fa-star" style="font-size: ${Math.max(28, Math.round(Math.min(el.width, el.height) * 0.72))}px; color: ${el.bgColor && el.bgColor !== 'transparent' ? el.bgColor : el.textColor || '#D4A373'}; opacity: 0.28;"></i></div>`
+          : '';
       const flexDirOverride = el.type === 'pure_flex_row' || el.type === 'pure_banner' ? '; flex-direction: row; flex-wrap: wrap; align-items: center' : '';
       const rawBody = activeSplit
         ? renderSplitModifierHTML(el, activeSplit, children, allElements, isToyhouse, isToyhouseFree, renderInnerElementHTML, escapeHtmlAttr)
-        : `
-        ${el.content || faInlineIconHtml ? `<div style="font-weight: 600;">${faInlineIconHtml}${el.content}</div>` : ''}
-        ${el.subContent ? `<div style="${el.content ? 'margin-top: 4px; ' : ''}font-size: ${Math.max(11, el.fontSize - 1)}px; white-space: pre-line;">${el.subContent}</div>` : ''}${nestedChildrenHTML}`;
+        : `${f2uStarBg}
+        ${el.content || faInlineIconHtml ? `<div style="position: relative; z-index: 1; font-weight: 600;">${faInlineIconHtml}${el.content}</div>` : ''}
+        ${el.subContent ? `<div style="position: relative; z-index: 1; ${el.content ? 'margin-top: 4px; ' : ''}font-size: ${Math.max(11, el.fontSize - 1)}px; white-space: pre-line;">${el.subContent}</div>` : ''}${nestedChildrenHTML}`;
       const innerContent = usesF2UPunch
         ? `<div style="position: relative; z-index: 2; flex: 1; display: flex; flex-direction: column; min-height: 0; width: 100%; height: 100%;">${rawBody}</div>`
         : rawBody;
@@ -1734,6 +1802,12 @@ ${nodesHtml}
       const lColor =
         el.borderTopColor ||
         (el.borderColor && el.borderColor !== 'transparent' ? el.borderColor : '#18181B');
+      const hasArbitraryAngle = Boolean(rawEl.rotation && Math.round(rawEl.rotation) % 90 !== 0);
+      if (isToyhouseFree && hasArbitraryAngle && rawEl.rotation) {
+        return `<div class="${classes}" style="width: 100%; height: 100%; box-sizing: border-box; display: flex; align-items: center; justify-content: center; ${opacityCss};">
+      <div style="${buildF2UAngledLineCss(rawEl.rotation, lColor, thick)}"></div>
+    </div>`;
+      }
       const lineCss = isVertical
         ? `height: 100%; width: 0; border-left: ${thick}px ${lStyle} ${lColor}; margin: 0 auto;`
         : `width: 100%; height: 0; border-top: ${thick}px ${lStyle} ${lColor};`;
@@ -2236,6 +2310,18 @@ export function generatePlatformExport(
       .join('\n');
 
     const stageStyle = `width: ${canvasWidth}px; min-width: ${canvasWidth}px; height: ${stageHeight}px; margin: 0 auto; position: relative; box-sizing: border-box; ${containerSurfaceCss} ${containerBorderAndPaddingCss} ${containerOverflowCss}`;
+    const roundTripComment =
+      activeElements.length > 0
+        ? `\n<!-- DBX_ROUNDTRIP_V1:${encodeRoundTripPayload({
+            v: 1,
+            mode,
+            canvasWidth,
+            canvasHeight,
+            canvasBg,
+            canvasPattern,
+            elements: activeElements,
+          })} -->`
+        : '';
 
     const html = isToyhouseFree
       ? `<!-- Generated by DesignBox | Platform: TOYHOUSE F2U (Non-Premium / Free) | Mode: Freeform Collage (Fixed-Px + Scroll Safe) -->
@@ -2243,13 +2329,13 @@ export function generatePlatformExport(
   <div class="mx-auto" style="${stageStyle}">
 ${childrenHtml}
   </div>
-</div>`
+</div>${roundTripComment}`
       : `<!-- Generated by DesignBox | Platform: ${platform.toUpperCase()} | Mode: Freeform Collage (Fixed-Px + Scroll Safe) -->
 ${coreGridAndAnimationCss}<div style="width: 100%; max-width: 100%; overflow: auto; overflow-x: auto; overflow-y: visible;">
   <div class="${isToyhouse ? 'mx-auto' : 'dbx-carrd-root'}" style="${stageStyle}">
 ${childrenHtml}
   </div>
-</div>`;
+</div>${roundTripComment}`;
 
     return {
       html,
@@ -2287,6 +2373,19 @@ ${colsHtml}
     })
     .join('\n\n');
 
+  const roundTripComment =
+    activeElements.length > 0
+      ? `\n<!-- DBX_ROUNDTRIP_V1:${encodeRoundTripPayload({
+          v: 1,
+          mode,
+          canvasWidth,
+          canvasHeight,
+          canvasBg,
+          canvasPattern,
+          elements: activeElements,
+        })} -->`
+      : '';
+
   const html = isToyhouseFree
     ? `<!-- Generated by DesignBox | Platform: TOYHOUSE F2U (Non-Premium / Free) | Mode: ${
         mode === 'hybrid'
@@ -2295,7 +2394,7 @@ ${colsHtml}
       } -->
 <div class="row no-gutters mx-auto" style="max-width: ${canvasWidth}px; width: 100%; position: relative; min-height: ${canvasHeight}px; ${containerSurfaceCss} ${containerBorderAndPaddingCss} ${containerOverflowCss}">
 ${rowsHtml}${floatingHtml}
-</div>`
+</div>${roundTripComment}`
     : `<!-- Generated by DesignBox | Platform: ${platform.toUpperCase()} | Mode: ${
         mode === 'hybrid'
           ? `Dynamic Hybrid (${solvedRows.length} Grid Rows + ${floatingElements.length} Floating Stickers)`
@@ -2303,7 +2402,7 @@ ${rowsHtml}${floatingHtml}
       } -->
 ${coreGridAndAnimationCss}<div class="${isToyhouse ? `container ${isCanvasTransparent ? 'p-0' : 'p-3'}` : 'dbx-carrd-root'}" style="max-width: ${canvasWidth}px; margin: 0 auto; position: relative; min-height: ${canvasHeight}px; ${containerSurfaceCss} ${containerBorderAndPaddingCss} ${containerOverflowCss}">
 ${rowsHtml}${floatingHtml}
-</div>`;
+</div>${roundTripComment}`;
 
   return {
     html,

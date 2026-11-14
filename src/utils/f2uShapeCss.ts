@@ -157,3 +157,68 @@ export function buildF2UCornerMaskOverlayCss(
     'pointer-events: none',
   ].join('; ');
 }
+
+/**
+ * Builds an F2U-safe diagonal line gradient without transform: rotate() or calc().
+ */
+export function buildF2UAngledLineCss(
+  angleDeg: number,
+  color: string,
+  thicknessPx: number
+): string {
+  const safeColor = color && color !== 'transparent' ? color : '#18181B';
+  const normAngle = ((Math.round(angleDeg) % 360) + 360) % 360;
+  const halfBand = Math.min(8, Math.max(0.7, thicknessPx * 0.45));
+  const stopA = (50 - halfBand).toFixed(2);
+  const stopB = (50 - halfBand * 0.4).toFixed(2);
+  const stopC = (50 + halfBand * 0.4).toFixed(2);
+  const stopD = (50 + halfBand).toFixed(2);
+  return `width: 100%; height: 100%; background-color: transparent; background-image: linear-gradient(${normAngle}deg, transparent ${stopA}%, ${safeColor} ${stopB}%, ${safeColor} ${stopC}%, transparent ${stopD}%)`;
+}
+
+/**
+ * Builds HTMLPurifier-safe corner/edge radial-gradient cutouts (e.g. ticket notches or cross-star corner scoops)
+ * using only inline radial-gradient declarations without clip-path or SVG.
+ */
+export function buildF2URadialCutoutCss(
+  kind: 'ticket' | 'cross_star' | 'scallop',
+  fillColor: string,
+  maskBgColor = 'transparent'
+): string {
+  const safeFill = fillColor && fillColor !== 'transparent' ? fillColor : '#FAF8F5';
+  const safeMask = maskBgColor && maskBgColor !== 'transparent' ? maskBgColor : 'transparent';
+
+  if (kind === 'ticket') {
+    const notchLeft = `radial-gradient(circle at 0% 50%, ${safeMask} 12px, ${safeFill} 12.6px)`;
+    const notchRight = `radial-gradient(circle at 100% 50%, ${safeMask} 12px, ${safeFill} 12.6px)`;
+    return [
+      'background-color: transparent',
+      `background-image: ${notchLeft}, ${notchRight}`,
+      'background-position: left center, right center',
+      'background-size: 51% 100%',
+      'background-repeat: no-repeat',
+    ].join('; ');
+  }
+
+  if (kind === 'cross_star') {
+    const tl = `radial-gradient(circle at 0% 0%, ${safeMask} 48%, ${safeFill} 49%)`;
+    const tr = `radial-gradient(circle at 100% 0%, ${safeMask} 48%, ${safeFill} 49%)`;
+    const bl = `radial-gradient(circle at 0% 100%, ${safeMask} 48%, ${safeFill} 49%)`;
+    const br = `radial-gradient(circle at 100% 100%, ${safeMask} 48%, ${safeFill} 49%)`;
+    return [
+      'background-color: transparent',
+      `background-image: ${tl}, ${tr}, ${bl}, ${br}`,
+      'background-position: top left, top right, bottom left, bottom right',
+      'background-size: 51% 51%',
+      'background-repeat: no-repeat',
+    ].join('; ');
+  }
+
+  // Scallop: decorative radial repeating edge pattern
+  return [
+    `background-color: ${safeFill}`,
+    `background-image: radial-gradient(circle at 50% 0%, ${safeMask} 8px, transparent 8.6px), radial-gradient(circle at 50% 100%, ${safeMask} 8px, transparent 8.6px)`,
+    'background-size: 24px 100%',
+    'background-repeat: repeat-x',
+  ].join('; ');
+}

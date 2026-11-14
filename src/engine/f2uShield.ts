@@ -103,7 +103,7 @@ export function getElementF2UShieldReport(el: DesignElement): F2UShieldReport {
     });
   }
 
-  if (el.rotation && Math.round(el.rotation) % 90 !== 0) {
+  if (el.rotation && Math.round(el.rotation) % 90 !== 0 && el.type !== 'pure_line') {
     items.push({
       key: 'rotation',
       label: `Rotation (${el.rotation}° → 0°)` ,

@@ -1,8 +1,11 @@
 import {
+  BgPattern,
   BorderStyle,
   DesignElement,
   ElementType,
+  LayoutMode,
   TabItem,
+  UiTheme,
 } from '../types/schema';
 import { buildDefaultElement } from '../utils/elementFactory';
 
@@ -22,10 +25,48 @@ export interface HtmlImportResult {
   extractedSwatches: string[];
   breakdown: HtmlImportBreakdown;
   warnings: string[];
+  roundTripMeta?: {
+    mode?: LayoutMode;
+    canvasWidth?: number;
+    canvasHeight?: number;
+    canvasBg?: string;
+    canvasPattern?: BgPattern;
+  };
+}
+
+function decodeRoundTripPayload(rawB64: string): {
+  mode?: LayoutMode;
+  canvasWidth?: number;
+  canvasHeight?: number;
+  canvasBg?: string;
+  canvasPattern?: BgPattern;
+  elements?: DesignElement[];
+} | null {
+  try {
+    const bin = atob(rawB64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) {
+      bytes[i] = bin.charCodeAt(i);
+    }
+    const json = new TextDecoder().decode(bytes);
+    const parsed = JSON.parse(json) as {
+      v?: number;
+      mode?: LayoutMode;
+      canvasWidth?: number;
+      canvasHeight?: number;
+      canvasBg?: string;
+      canvasPattern?: BgPattern;
+      elements?: DesignElement[];
+    };
+    if (!parsed || !Array.isArray(parsed.elements)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 export interface HtmlImportOptions {
-  uiTheme: 'carbon' | 'paper';
+  uiTheme: UiTheme;
   canvasWidth?: number;
   startRowIndex?: number;
   startY?: number;
@@ -178,6 +219,34 @@ function applyCommonInlineCssToElement(base: DesignElement, el: Element): Design
     next.scrollable = true;
   }
 
+  // Preserve unrecognized inline CSS properties so external HTML edits round-trip faithfully
+  const handledCssProps = new Set([
+    'background-color',
+    'background',
+    'color',
+    'border',
+    'border-color',
+    'border-radius',
+    'padding',
+    'font-size',
+    'text-align',
+    'font-family',
+    'overflow',
+    'overflow-y',
+    'position',
+    'left',
+    'top',
+    'width',
+    'height',
+    'z-index',
+  ]);
+  const extraDecls = Object.entries(css)
+    .filter(([k]) => !handledCssProps.has(k))
+    .map(([k, v]) => `${k}: ${v}`);
+  if (extraDecls.length > 0) {
+    next.customInlineStyle = extraDecls.join('; ');
+  }
+
   return next;
 }
 
@@ -216,11 +285,42 @@ export function parseToyhouseHtmlToDesign(
     );
   }
 
+  const extractedSwatches = extractHexSwatchesFromHtml(trimmed);
+
+  // 1. Check for DesignBox lossless round-trip metadata first
+  const roundTripMatch = trimmed.match(/<!--\s*DBX_ROUNDTRIP_V1:([A-Za-z0-9+/=]+)\s*-->/);
+  if (roundTripMatch) {
+    const decoded = decodeRoundTripPayload(roundTripMatch[1]);
+    if (decoded && Array.isArray(decoded.elements) && decoded.elements.length > 0) {
+      const cloned = decoded.elements.map((el) => ({ ...el }));
+      for (const el of cloned) {
+        if (el.type === 'image' || el.type === 'pure_image_slot') breakdown.images += 1;
+        else if (el.type === 'tabs' || el.type === 'pure_f2u_tabs') breakdown.tabs += 1;
+        else if (el.type === 'button' || el.type === 'pure_link') breakdown.buttons += 1;
+        else if (el.type === 'text' || el.type === 'pure_heading' || el.type === 'pure_paragraph') breakdown.texts += 1;
+        else if (el.type === 'custom_widget') breakdown.customWidgets += 1;
+        else breakdown.boxes += 1;
+      }
+      return {
+        elements: cloned,
+        extractedSwatches,
+        breakdown,
+        warnings,
+        roundTripMeta: {
+          mode: decoded.mode,
+          canvasWidth: decoded.canvasWidth,
+          canvasHeight: decoded.canvasHeight,
+          canvasBg: decoded.canvasBg,
+          canvasPattern: decoded.canvasPattern,
+        },
+      };
+    }
+  }
+
   const parser = new DOMParser();
   const doc = parser.parseFromString(trimmed, 'text/html');
   doc.querySelectorAll('script, style').forEach((n) => n.remove());
 
-  const extractedSwatches = extractHexSwatchesFromHtml(trimmed);
   const produced: DesignElement[] = [];
 
   let currentRowIndex = startRowIndex;
@@ -645,6 +745,46 @@ export function parseToyhouseHtmlToDesign(
         }
       }
 
+      // Position: absolute freeform collage element (from external Toyhouse codes or Freeform stage)
+      const nodeCss = parseInlineStyles(node.getAttribute('style'));
+      if (nodeCss['position'] === 'absolute') {
+        const parseCoord = (raw: string | undefined, refTotal: number): number | undefined => {
+          if (!raw) return undefined;
+          const pctM = raw.match(/(-?\d+(?:\.\d+)?)%/);
+          if (pctM) return Math.round((parseFloat(pctM[1]) / 100) * refTotal);
+          return parsePxNumber(raw);
+        };
+        const absX = parseCoord(nodeCss['left'], canvasWidth) ?? marginX;
+        const absY = parseCoord(nodeCss['top'], 540) ?? currentY;
+        const absW = parseCoord(nodeCss['width'], canvasWidth) ?? 220;
+        const absH = parseCoord(nodeCss['height'], 540) ?? 120;
+        const absZ = parseInt(nodeCss['z-index'] || '10', 10) || 10;
+        const innerTarget = node.children.length === 1 ? node.children[0] : node;
+        const leaf = convertLeafNode(innerTarget, currentRowIndex, 6, absX, absY, absW);
+        produced.push({
+          ...leaf,
+          x: Math.max(0, absX),
+          y: Math.max(0, absY),
+          width: Math.max(24, absW),
+          height: Math.max(20, absH),
+          zIndex: absZ,
+        });
+        currentRowIndex += 1;
+        continue;
+      }
+
+      // Unwrap outer relative/freeform stage wrapper if its children are absolute-positioned
+      if (
+        tag === 'div' &&
+        node.children.length >= 1 &&
+        Array.from(node.children).some(
+          (ch) => parseInlineStyles(ch.getAttribute('style'))['position'] === 'absolute'
+        )
+      ) {
+        processNodeList(Array.from(node.children));
+        continue;
+      }
+
       const leaf = convertLeafNode(node, currentRowIndex, 12, marginX, currentY, usableWidth);
       produced.push(leaf);
       currentRowIndex += 1;
@@ -666,7 +806,12 @@ export function parseToyhouseHtmlToDesign(
     rootElements.length === 1 &&
     rootElements[0].tagName.toLowerCase() === 'div' &&
     (rootElements[0].querySelector(':scope > .row') ||
-      rootElements[0].children.length >= 2)
+      rootElements[0].children.length >= 2 ||
+      Array.from(rootElements[0].children).some(
+        (ch) =>
+          parseInlineStyles(ch.getAttribute('style'))['position'] === 'relative' ||
+          parseInlineStyles(ch.getAttribute('style'))['position'] === 'absolute'
+      ))
   ) {
     // Unwrap outermost centering/max-width page shell
     processNodeList(Array.from(rootElements[0].children));

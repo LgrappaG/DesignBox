@@ -40,3 +40,6 @@ Desktop.ini
 !.vscode/extensions.json
 .idea/
 
+# Local agent skills & workspace customizations
+.agents/
+
