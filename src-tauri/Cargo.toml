@@ -1,6 +1,6 @@
 [package]
 name = "designbox"
-version = "1.3.0"
+version = "1.4.0"
 description = "No-Code Visual Designer for Toyhouse & Carrd Pro"
 authors = ["Idris"]
 edition = "2021"
