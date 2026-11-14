@@ -4,6 +4,7 @@ import {
   DesignElement,
   ElementType,
   LayoutMode,
+  SplitModifier,
   TabItem,
   UiTheme,
 } from '../types/schema';
@@ -158,14 +159,14 @@ function parseBootstrapColSpan(el: Element, siblingCount: number): number {
 }
 
 function hasComplexFallbackMarkup(el: Element): boolean {
-  if (el.querySelector('table, svg, iframe, video, audio')) return true;
-  if (el.querySelector('[data-toggle="collapse"], .carousel, .accordion')) return true;
+  if (el.querySelector('svg, iframe, video, audio, .carousel')) return true;
   if (el.querySelectorAll('.progress').length > 1) return true;
-  // Deeply nested stylized structures beyond simple header/paragraph/img
-  const nestedCards = el.querySelectorAll('.card, .row').length;
-  if (nestedCards > 0) return true;
+  const nestedRows = el.querySelectorAll('.row').length;
+  if (nestedRows > 0) return true;
+  const nestedCards = el.querySelectorAll('.card').length;
+  if (nestedCards > 1) return true;
   const richLinks = el.querySelectorAll('a, i.fa, i[class*="fa-"]').length;
-  if (richLinks > 3) return true;
+  if (richLinks > 4) return true;
   return false;
 }
 
@@ -387,17 +388,27 @@ export function parseToyhouseHtmlToDesign(
     y: number,
     width: number
   ): DesignElement | null => {
-    if (!navEl.classList.contains('nav') && !navEl.classList.contains('nav-tabs')) return null;
+    if (
+      !navEl.classList.contains('nav') &&
+      !navEl.classList.contains('nav-tabs') &&
+      !navEl.classList.contains('nav-pills')
+    ) {
+      return null;
+    }
     if (!contentEl || !contentEl.classList.contains('tab-content')) return null;
 
     const links = Array.from(navEl.querySelectorAll('.nav-link, a'));
     const panes = Array.from(contentEl.querySelectorAll(':scope > .tab-pane'));
     if (links.length === 0 || panes.length === 0) return null;
 
-    const tabs: TabItem[] = panes.map((pane, idx) => {
-      const link = links[idx];
-      const title = link?.textContent?.trim() || `Tab ${idx + 1}`;
-      const bodyText = pane.textContent?.replace(/\s+/g, ' ').trim() || '';
+    const tabs: TabItem[] = links.map((link, idx) => {
+      const targetHref = (link.getAttribute('href') || link.getAttribute('data-target') || '').trim();
+      const matchedPane =
+        targetHref.startsWith('#') && targetHref.length > 1
+          ? panes.find((p) => p.id === targetHref.slice(1)) || panes[idx]
+          : panes[idx];
+      const title = link.textContent?.trim() || `Tab ${idx + 1}`;
+      const bodyText = matchedPane?.textContent?.replace(/\s+/g, ' ').trim() || '';
       return {
         id: `imp-tab-${idx + 1}-${Date.now().toString().slice(-3)}`,
         title,
@@ -515,13 +526,144 @@ export function parseToyhouseHtmlToDesign(
       };
     }
 
+    // 4b. Bootstrap Progress Bar (.progress / .progress-bar) -> pure_progress
+    if (
+      node.classList.contains('progress') ||
+      node.classList.contains('progress-bar') ||
+      Boolean(node.querySelector('.progress-bar') && !node.querySelector('.card, .row'))
+    ) {
+      const barEl = node.classList.contains('progress-bar')
+        ? node
+        : node.querySelector('.progress-bar') || node;
+      const barCss = parseInlineStyles(barEl.getAttribute('style'));
+      const ariaVal = parseFloat(barEl.getAttribute('aria-valuenow') || '');
+      const widthMatch = (barCss['width'] || '').match(/(\d+(?:\.\d+)?)\s*%/);
+      const pct = Math.max(
+        0,
+        Math.min(
+          100,
+          Math.round(
+            !Number.isNaN(ariaVal)
+              ? ariaVal
+              : widthMatch
+              ? parseFloat(widthMatch[1])
+              : 65
+          )
+        )
+      );
+      const barColor = extractColorToken(barCss['background-color'] || barCss['background']);
+      const base = createFromType('pure_progress', rowIndex, colSpan, x, y, width, 54);
+      const styled = applyCommonInlineCssToElement(base, node);
+      breakdown.boxes += 1;
+      return {
+        ...styled,
+        label: 'Imported Progress Bar',
+        content: barEl.textContent?.trim() || 'Progress',
+        subContent: String(pct),
+        progressBarColor: barColor || styled.progressBarColor,
+        progressStriped: barEl.classList.contains('progress-bar-striped'),
+        progressAnimated: barEl.classList.contains('progress-bar-animated'),
+      };
+    }
+
+    // 4c. Native HTML <details><summary> -> accordion
+    if (tag === 'details') {
+      const summaryEl = node.querySelector('summary');
+      const headerText = summaryEl?.textContent?.trim() || 'Details';
+      const bodyParts = Array.from(node.childNodes)
+        .filter((ch) => ch !== summaryEl)
+        .map((ch) => ch.textContent?.trim() || '')
+        .filter(Boolean);
+      const bodyText = bodyParts.join(' ').replace(/\s+/g, ' ').trim();
+      const base = createFromType('accordion', rowIndex, colSpan, x, y, width, 88);
+      breakdown.boxes += 1;
+      return {
+        ...applyCommonInlineCssToElement(base, node),
+        label: 'Imported Accordion',
+        content: headerText,
+        subContent: bodyText || 'Collapsible content.',
+        collapseDefaultOpen: node.hasAttribute('open'),
+      };
+    }
+
+    // 4d. Bootstrap .alert -> dni_warning
+    if (node.classList.contains('alert')) {
+      const headEl = node.querySelector('h1, h2, h3, h4, h5, h6, strong, b, .alert-heading');
+      const fullText = node.textContent?.replace(/\s+/g, ' ').trim() || 'Notice';
+      const headText = headEl?.textContent?.trim() || 'NOTICE';
+      const bodyText = headEl
+        ? fullText.replace(headText, '').trim() || fullText
+        : fullText;
+      const base = createFromType('dni_warning', rowIndex, colSpan, x, y, width, 78);
+      breakdown.boxes += 1;
+      return {
+        ...applyCommonInlineCssToElement(base, node),
+        label: 'Imported Alert',
+        content: headText,
+        subContent: bodyText,
+        bsClasses: cls,
+      };
+    }
+
+    // 4e. Bootstrap .badge / .badge-pill -> badge
+    if (node.classList.contains('badge')) {
+      const badgeText = node.textContent?.trim() || 'BADGE';
+      const isPill = node.classList.contains('badge-pill') || /\brounded-pill\b/.test(cls);
+      const estW = Math.max(96, Math.min(width, badgeText.length * 9 + 42));
+      const base = createFromType('badge', rowIndex, colSpan, x, y, estW, 38);
+      const styled = applyCommonInlineCssToElement(base, node);
+      breakdown.boxes += 1;
+      return {
+        ...styled,
+        label: badgeText.slice(0, 24),
+        content: badgeText,
+        ...(isPill
+          ? {
+              borderRadius: 999,
+              radiusTL: 999,
+              radiusTR: 999,
+              radiusBR: 999,
+              radiusBL: 999,
+              cornersLinked: true,
+            }
+          : {}),
+      };
+    }
+
+    // 4f. Lists <ul> / <ol> -> pure_list
+    if (
+      (tag === 'ul' || tag === 'ol') &&
+      !node.classList.contains('nav') &&
+      !node.classList.contains('nav-tabs') &&
+      !node.classList.contains('nav-pills')
+    ) {
+      const liItems = Array.from(node.querySelectorAll('li'))
+        .map((li) => li.textContent?.replace(/\s+/g, ' ').trim() || '')
+        .filter(Boolean);
+      const estH = Math.max(64, Math.min(280, 32 + liItems.length * 24));
+      const base = createFromType('pure_list', rowIndex, colSpan, x, y, width, estH);
+      breakdown.texts += 1;
+      return {
+        ...applyCommonInlineCssToElement(base, node),
+        label: tag === 'ol' ? 'Numbered List' : 'Bullet List',
+        content: '',
+        subContent: liItems.join('\n') || 'First item',
+        listStyleType: tag === 'ol' ? 'decimal' : 'disc',
+      };
+    }
+
     // 5. Horizontal Rule -> Divider
     if (tag === 'hr') {
       breakdown.boxes += 1;
       const base = createFromType('divider', rowIndex, colSpan, x, y, width, 24);
+      const topBorder = parseBorderShorthand(css['border-top']);
+      const styled = applyCommonInlineCssToElement(base, node);
       return {
-        ...applyCommonInlineCssToElement(base, node),
+        ...styled,
         label: 'Divider Line',
+        borderWidth: topBorder.width ?? styled.borderWidth,
+        borderStyle: topBorder.style ?? styled.borderStyle,
+        borderColor: topBorder.color ?? styled.borderColor,
       };
     }
 
@@ -602,16 +744,86 @@ export function parseToyhouseHtmlToDesign(
     return buildCustomWidget(node, rowIndex, colSpan, x, y, width, 120);
   };
 
+  const consumedNodes = new Set<Element>();
+
+  const hasRichNestedWidget = (el: Element): boolean =>
+    Boolean(
+      el.querySelector(
+        '.nav-tabs, .nav-pills, .tab-content, .progress, details, [data-toggle="collapse"], .alert, table, .row, ul, ol, img'
+      )
+    );
+
+  const extractColumnText = (el: Element): string => {
+    const blocks = Array.from(el.querySelectorAll('p, h1, h2, h3, h4, h5, h6, .card-body, .card-text'));
+    if (blocks.length > 0) {
+      return blocks
+        .map((b) => b.textContent?.replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+        .join('\n\n');
+    }
+    return el.textContent?.replace(/\s+/g, ' ').trim() || '';
+  };
+
   const processNodeList = (nodes: Element[]) => {
     for (let i = 0; i < nodes.length; i++) {
       const node = nodes[i];
+      if (consumedNodes.has(node)) continue;
       const tag = node.tagName.toLowerCase();
 
       // Skip blank decorative spacers/comments
       if (tag === 'br') continue;
 
-      // Pair .nav-tabs + next .tab-content into native tabs widget
-      if (node.classList.contains('nav') || node.classList.contains('nav-tabs')) {
+      // Pair [data-toggle="collapse"] trigger + target .collapse panel -> accordion
+      const collapseTrigger =
+        node.getAttribute('data-toggle') === 'collapse'
+          ? node
+          : node.querySelector('[data-toggle="collapse"]');
+      if (collapseTrigger) {
+        const rawTarget = (
+          collapseTrigger.getAttribute('href') ||
+          collapseTrigger.getAttribute('data-target') ||
+          ''
+        ).trim();
+        const targetId = rawTarget.startsWith('#') ? rawTarget.slice(1) : rawTarget;
+        const siblingTarget =
+          nodes[i + 1] &&
+          (nodes[i + 1].classList.contains('collapse') ||
+            (targetId !== '' && nodes[i + 1].id === targetId))
+            ? nodes[i + 1]
+            : null;
+        const targetEl =
+          siblingTarget ||
+          node.querySelector('.collapse') ||
+          (targetId ? doc.querySelector(`#${targetId}`) : null);
+
+        if (targetEl) {
+          consumedNodes.add(targetEl);
+          const title = collapseTrigger.textContent?.replace(/\s+/g, ' ').trim() || 'Accordion';
+          const bodyNode = targetEl.querySelector('.card-body, .card-block') || targetEl;
+          const bodyText = bodyNode.textContent?.replace(/\s+/g, ' ').trim() || '';
+          const base = createFromType('accordion', currentRowIndex, 12, marginX, currentY, usableWidth, 88);
+          const styled = applyCommonInlineCssToElement(base, node);
+          breakdown.boxes += 1;
+          produced.push({
+            ...styled,
+            label: 'Imported Collapse Accordion',
+            content: title,
+            subContent: bodyText || 'Collapsed content.',
+            collapseDefaultOpen: targetEl.classList.contains('show'),
+            f2uCollapseId: targetId || undefined,
+          });
+          currentRowIndex += 1;
+          currentY += 104;
+          continue;
+        }
+      }
+
+      // Pair .nav-tabs / .nav-pills + next .tab-content into native tabs widget
+      if (
+        node.classList.contains('nav') ||
+        node.classList.contains('nav-tabs') ||
+        node.classList.contains('nav-pills')
+      ) {
         const nextNode = nodes[i + 1] || null;
         const tabEl = tryParseTabPair(
           node,
@@ -623,6 +835,7 @@ export function parseToyhouseHtmlToDesign(
           usableWidth
         );
         if (tabEl) {
+          if (nextNode) consumedNodes.add(nextNode);
           produced.push(tabEl);
           currentRowIndex += 1;
           currentY += tabEl.height + 16;
@@ -631,16 +844,63 @@ export function parseToyhouseHtmlToDesign(
         }
       }
 
-      // Bootstrap .row -> convert .col* children horizontally
+      // Bootstrap .row -> 2-col split_box or proportional multi-column 12-grid placement
       if (node.classList.contains('row')) {
         const rowChildren = Array.from(node.children).filter(
           (ch) => ch.tagName.toLowerCase() !== 'br'
         );
         if (rowChildren.length > 0) {
           breakdown.rows += 1;
+
+          // 2-column simple row -> split_box with exact split ratio
+          if (
+            rowChildren.length === 2 &&
+            !hasRichNestedWidget(rowChildren[0]) &&
+            !hasRichNestedWidget(rowChildren[1])
+          ) {
+            const [col1, col2] = rowChildren;
+            const span1 = parseBootstrapColSpan(col1, 2);
+            const span2 = parseBootstrapColSpan(col2, 2);
+            const ratio = Math.max(
+              15,
+              Math.min(85, Math.round((span1 / Math.max(1, span1 + span2)) * 100))
+            );
+            const leftText = extractColumnText(col1);
+            const rightText = extractColumnText(col2);
+            const col1Css = parseInlineStyles(col1.getAttribute('style'));
+            const col2Css = parseInlineStyles(col2.getAttribute('style'));
+            const base = createFromType('split_box', currentRowIndex, 12, 0, currentY, canvasWidth, 148);
+            const splitMod: SplitModifier = {
+              id: `imp-split-${produced.length + 1}`,
+              kind: 'split',
+              enabled: true,
+              axis: 'vertical',
+              panes: 2,
+              ratio,
+              dividerWidth: 1,
+              dividerStyle: 'solid',
+              dividerColor: base.borderColor,
+              pane1Bg: extractColorToken(col1Css['background-color'] || col1Css['background']),
+              pane2Bg: extractColorToken(col2Css['background-color'] || col2Css['background']),
+              pane1Text: leftText,
+              pane2Text: rightText,
+            };
+            breakdown.boxes += 1;
+            produced.push({
+              ...applyCommonInlineCssToElement(base, node),
+              label: 'Imported Split Box',
+              content: '',
+              subContent: `${leftText} || ${rightText}`,
+              modifiers: [splitMod],
+            });
+            currentRowIndex += 1;
+            currentY += 164;
+            continue;
+          }
+
           let colCursor = 0;
+          let usedRowW = 0;
           let rowMaxH = 0;
-          const colGap = 12;
 
           for (const colEl of rowChildren) {
             const span = parseBootstrapColSpan(colEl, rowChildren.length);
@@ -648,14 +908,19 @@ export function parseToyhouseHtmlToDesign(
               currentRowIndex += 1;
               currentY += rowMaxH + 16;
               colCursor = 0;
+              usedRowW = 0;
               rowMaxH = 0;
             }
 
-            const colX = marginX + Math.round((usableWidth * colCursor) / 12);
+            const colX = Math.round((canvasWidth * colCursor) / 12);
+            const remainingCols = 12 - (colCursor + span);
             const colW = Math.max(
-              80,
-              Math.round((usableWidth * span) / 12) - (colCursor + span < 12 ? colGap : 0)
+              48,
+              remainingCols <= 0
+                ? canvasWidth - usedRowW
+                : Math.round((canvasWidth * span) / 12)
             );
+            usedRowW += colW;
 
             // Inspect inside single .col wrapper: unwrap if simple single child or convert directly
             const innerChildren = Array.from(colEl.children);
@@ -663,7 +928,8 @@ export function parseToyhouseHtmlToDesign(
             if (
               innerChildren.length === 2 &&
               (innerChildren[0].classList.contains('nav') ||
-                innerChildren[0].classList.contains('nav-tabs')) &&
+                innerChildren[0].classList.contains('nav-tabs') ||
+                innerChildren[0].classList.contains('nav-pills')) &&
               innerChildren[1].classList.contains('tab-content')
             ) {
               parsedEl =
@@ -680,7 +946,13 @@ export function parseToyhouseHtmlToDesign(
               innerChildren.length === 1 &&
               (innerChildren[0].classList.contains('card') ||
                 innerChildren[0].tagName.toLowerCase() === 'img' ||
-                innerChildren[0].classList.contains('nav-tabs'))
+                innerChildren[0].classList.contains('nav-tabs') ||
+                innerChildren[0].classList.contains('progress') ||
+                innerChildren[0].classList.contains('alert') ||
+                innerChildren[0].classList.contains('badge') ||
+                innerChildren[0].tagName.toLowerCase() === 'details' ||
+                innerChildren[0].tagName.toLowerCase() === 'ul' ||
+                innerChildren[0].tagName.toLowerCase() === 'ol')
             ) {
               parsedEl = convertLeafNode(
                 innerChildren[0],
@@ -690,7 +962,11 @@ export function parseToyhouseHtmlToDesign(
                 currentY,
                 colW
               );
-              parsedEl = applyCommonInlineCssToElement(parsedEl, colEl);
+              parsedEl = {
+                ...applyCommonInlineCssToElement(parsedEl, colEl),
+                x: colX,
+                width: colW,
+              };
             } else {
               parsedEl = convertLeafNode(colEl, currentRowIndex, span, colX, currentY, colW);
             }
@@ -805,6 +1081,10 @@ export function parseToyhouseHtmlToDesign(
   } else if (
     rootElements.length === 1 &&
     rootElements[0].tagName.toLowerCase() === 'div' &&
+    !rootElements[0].classList.contains('row') &&
+    !rootElements[0].classList.contains('card') &&
+    !rootElements[0].classList.contains('alert') &&
+    !rootElements[0].classList.contains('tab-content') &&
     (rootElements[0].querySelector(':scope > .row') ||
       rootElements[0].children.length >= 2 ||
       Array.from(rootElements[0].children).some(

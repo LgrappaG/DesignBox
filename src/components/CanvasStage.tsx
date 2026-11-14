@@ -212,6 +212,7 @@ export interface CanvasStageProps {
   onResetBottomDockHeight: () => void;
   onChangePlatform: (platform: TargetPlatform) => void;
   onCopyCode: () => void;
+  onExportHtml: () => void;
   onChangePreviewSurface: (surface: PreviewSurface) => void;
   onChangePreviewViewport: (vp: PreviewViewport) => void;
   onOpenRightCodeTab: () => void;
@@ -348,6 +349,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
   onResetBottomDockHeight,
   onChangePlatform,
   onCopyCode,
+  onExportHtml,
   onChangePreviewSurface,
   onChangePreviewViewport,
   onOpenRightCodeTab,
@@ -1949,6 +1951,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
           warnings={exportResult.warnings}
           copied={copied}
           onCopyCode={onCopyCode}
+          onExportHtml={onExportHtml}
           previewSrcDoc={previewSrcDoc}
           previewSurface={previewSurface}
           onPreviewSurfaceChange={onChangePreviewSurface}

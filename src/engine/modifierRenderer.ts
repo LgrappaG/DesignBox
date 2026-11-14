@@ -449,7 +449,8 @@ export function renderSplitModifierHTML(
     isFreeformFixed: boolean,
     isToyhouseFree: boolean
   ) => string,
-  escapeAttr: (v: string) => string
+  escapeAttr: (v: string) => string,
+  sanitizeBodyFn: (v: string) => string = (v) => v
 ): string {
   const isVert = split.axis === 'vertical';
   const r1 = Math.max(10, Math.min(85, split.ratio));
@@ -506,7 +507,7 @@ export function renderSplitModifierHTML(
 
       const fallbackText =
         paneTexts[idx] !== undefined && paneTexts[idx] !== ''
-          ? paneTexts[idx]
+          ? sanitizeBodyFn(paneTexts[idx]!)
           : idx === 0 && !childrenHtml && (el.content || el.subContent)
           ? `${el.content ? `<div style="font-weight: 600;">${el.content}</div>` : ''}${el.subContent ? `<div style="font-size: ${Math.max(11, el.fontSize - 1)}px; white-space: pre-line;">${el.subContent}</div>` : ''}`
           : '';

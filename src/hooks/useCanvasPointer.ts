@@ -11,6 +11,7 @@ import {
 } from '../types/schema';
 import { getInnerBoxGeometry, getSplitPaneGeometry } from '../utils/canvasGeometry';
 import {
+  computeMultiSelectMoveDelta,
   computeSmartMoveSnap,
   computeSmartResizeSnap,
   extractOtherSnapRects,
@@ -68,8 +69,6 @@ export interface SplitDragState {
   boxW: number;
   boxH: number;
 }
-
-const SNAP_GRID = 4;
 
 export interface UseCanvasPointerOptions {
   elements: DesignElement[];
@@ -399,15 +398,39 @@ export function useCanvasPointer({
             : [dragState.id];
 
           if (movingIds.length > 1) {
-            const snappedDx = Math.round(dx / SNAP_GRID) * SNAP_GRID;
-            const snappedDy = Math.round(dy / SNAP_GRID) * SNAP_GRID;
+            const movingRects = prev
+              .filter((item) => Boolean(dragState.origPositions?.[item.id]) && !item.locked)
+              .map((item) => {
+                const orig = dragState.origPositions![item.id];
+                return {
+                  id: item.id,
+                  x: orig.x,
+                  y: orig.y,
+                  width: item.width,
+                  height: item.height,
+                };
+              });
+            const topOthers = extractOtherSnapRects(prev, new Set(movingIds));
+            const mSnap = computeMultiSelectMoveDelta({
+              movingRects,
+              dx,
+              dy,
+              canvasWidth,
+              canvasHeight,
+              others: topOthers,
+              guides,
+              magneticSnap,
+              zoom,
+            });
+            nextSnapLines = mSnap.lines;
+            nextSpacingBadges = mSnap.spacing;
             return prev.map((item) => {
               if (!dragState.origPositions?.[item.id] || item.locked) return item;
               const orig = dragState.origPositions[item.id];
               return {
                 ...item,
-                x: Math.max(0, Math.min(canvasWidth - item.width, orig.x + snappedDx)),
-                y: Math.max(0, Math.min(canvasHeight - item.height, orig.y + snappedDy)),
+                x: Math.max(0, Math.min(canvasWidth - item.width, orig.x + mSnap.dx)),
+                y: Math.max(0, Math.min(canvasHeight - item.height, orig.y + mSnap.dy)),
               };
             });
           }
@@ -477,6 +500,7 @@ export function useCanvasPointer({
                 others: paneOthers,
                 guides: [],
                 magneticSnap,
+                zoom,
               });
               nextSnapLines = snap.lines.map((line) => ({
                 ...line,
@@ -512,6 +536,7 @@ export function useCanvasPointer({
               others: topOthers,
               guides,
               magneticSnap,
+              zoom,
             });
             nextSnapLines = snap.lines;
             nextSpacingBadges = snap.spacing;
@@ -546,6 +571,7 @@ export function useCanvasPointer({
               others: paneOthers,
               guides: [],
               magneticSnap,
+              zoom,
             });
             const finalW = Math.min(rSnap.width, Math.max(minResizeW, pRect.paneW - rSnap.x));
             const finalH = Math.min(rSnap.height, Math.max(minResizeH, pRect.paneH - rSnap.y));
@@ -583,6 +609,7 @@ export function useCanvasPointer({
             others: topOthers,
             guides,
             magneticSnap,
+            zoom,
           });
           nextSnapLines = rSnap.lines;
 

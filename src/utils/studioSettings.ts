@@ -555,6 +555,7 @@ export function extractDesignImageUrls(elements: ReadonlyArray<DesignElement>): 
       pushUrl(el.url);
     }
     pushUrl(el.hoverImageUrl);
+    pushUrl(el.bgImageUrl);
     if (Array.isArray(el.gallery)) {
       for (const item of el.gallery) {
         pushUrl(item.url);

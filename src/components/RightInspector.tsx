@@ -113,6 +113,7 @@ export interface RightInspectorProps {
   onRemoveSwatch: (hex: string) => void;
   onChangePlatform: (platform: TargetPlatform) => void;
   onCopyCode: () => void;
+  onExportHtml: () => void;
 }
 
 const COMPACT_TABS: Array<{
@@ -183,6 +184,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
   onApplySwatchColor,
   onRemoveSwatch,
   onCopyCode,
+  onExportHtml,
 }) => {
   const isToyhouseFree = platform === 'toyhouse_free' || platform === 'toyhouse_oc';
   const [showProEffectsInF2U, setShowProEffectsInF2U] = useState(false);
@@ -692,14 +694,25 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
             <div className="flex-1 min-h-[180px] flex flex-col">
               <div className="flex items-center justify-between mb-1">
                 <span className="font-semibold text-[11px]">Generated Output</span>
-                <button
-                  type="button"
-                  onClick={onCopyCode}
-                  style={{ color: 'var(--accent)' }}
-                  className="text-[11px] font-mono hover:underline"
-                >
-                  {copied ? 'Copied!' : 'Copy Snippet'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={onExportHtml}
+                    style={{ color: 'var(--text-main)' }}
+                    className="text-[11px] font-mono hover:underline"
+                    title="Save exported .html file"
+                  >
+                    Save .HTML
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onCopyCode}
+                    style={{ color: 'var(--accent)' }}
+                    className="text-[11px] font-mono hover:underline"
+                  >
+                    {copied ? 'Copied!' : 'Copy Snippet'}
+                  </button>
+                </div>
               </div>
               <pre
                 style={{

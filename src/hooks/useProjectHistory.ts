@@ -22,6 +22,124 @@ import {
   saveProjectToDiskFallback,
   SnapshotEntry,
 } from '../utils/tauriDesktop';
+import { exportHtmlFileDialog } from '../utils/tauriDesktop';
+
+export const PROJECT_FILE_VERSION = '3.0.0';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function toFiniteNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function sanitizeElementForMigration(raw: unknown, index: number): DesignElement | null {
+  if (!isRecord(raw) || typeof raw.id !== 'string' || typeof raw.type !== 'string') {
+    return null;
+  }
+  const el = raw as unknown as DesignElement;
+  const x = Math.max(0, Math.round(toFiniteNumber(raw.x, 0)));
+  const y = Math.max(0, Math.round(toFiniteNumber(raw.y, 0)));
+  const width = Math.max(16, Math.round(toFiniteNumber(raw.width, 160)));
+  const height = Math.max(16, Math.round(toFiniteNumber(raw.height, 80)));
+  const opacity = Math.max(0, Math.min(100, toFiniteNumber(raw.opacity, 100)));
+  const zIndex = Math.max(0, Math.round(toFiniteNumber(raw.zIndex, 10)));
+  const order = Math.max(0, Math.round(toFiniteNumber(raw.order, index)));
+  const rowIndex = Math.max(0, Math.round(toFiniteNumber(raw.rowIndex, index)));
+  const colSpan = Math.max(1, Math.min(12, Math.round(toFiniteNumber(raw.colSpan, 12))));
+  return {
+    ...el,
+    x,
+    y,
+    width,
+    height,
+    opacity,
+    zIndex,
+    order,
+    rowIndex,
+    colSpan,
+    label: typeof raw.label === 'string' ? raw.label : el.type,
+    content: typeof raw.content === 'string' ? raw.content : '',
+    modifiers: Array.isArray(raw.modifiers) ? el.modifiers : [],
+  };
+}
+
+/**
+ * Normalizes v1.x/v2.x/v3.x project payloads into a valid v3.0.0 ProjectFile schema,
+ * clamping invalid geometry and backfilling missing workspace arrays.
+ */
+export function migrateProjectPayload(raw: unknown): ProjectFile {
+  const obj = isRecord(raw) ? raw : {};
+  const rawPlatform = obj.platform;
+  const platform: TargetPlatform =
+    rawPlatform === 'toyhouse_free' ||
+    rawPlatform === 'toyhouse_premium' ||
+    rawPlatform === 'toyhouse_oc' ||
+    rawPlatform === 'toyhouse_profile' ||
+    rawPlatform === 'toyhouse_world' ||
+    rawPlatform === 'carrd_pro'
+      ? rawPlatform
+      : rawPlatform === 'toyhouse_pro'
+      ? 'toyhouse_premium'
+      : 'toyhouse_free';
+
+  const rawLayout = obj.layoutMode;
+  const layoutMode: LayoutMode =
+    rawLayout === 'hybrid' || rawLayout === 'block' || rawLayout === 'freeform'
+      ? rawLayout
+      : rawLayout === 'stack'
+      ? 'block'
+      : rawLayout === 'absolute'
+      ? 'freeform'
+      : 'hybrid';
+
+  const rawName = typeof obj.name === 'string' ? obj.name.trim() : '';
+  const name = rawName || 'Canvas Draft';
+  const canvasWidth = Math.max(320, Math.min(2400, Math.round(toFiniteNumber(obj.canvasWidth, 800))));
+  const canvasHeight = Math.max(320, Math.min(6000, Math.round(toFiniteNumber(obj.canvasHeight, 620))));
+
+  const swatches = Array.isArray(obj.swatches)
+    ? obj.swatches.filter((s): s is string => typeof s === 'string')
+    : [];
+
+  const guides: CanvasGuide[] = Array.isArray(obj.guides)
+    ? obj.guides.filter(
+        (g): g is CanvasGuide =>
+          isRecord(g) &&
+          typeof g.id === 'string' &&
+          (g.axis === 'x' || g.axis === 'y') &&
+          typeof g.pos === 'number' &&
+          Number.isFinite(g.pos)
+      )
+    : [];
+
+  const customBlueprints: CustomWidgetBlueprint[] = Array.isArray(obj.customBlueprints)
+    ? (obj.customBlueprints.filter((b) => isRecord(b) && typeof b.id === 'string') as unknown as CustomWidgetBlueprint[])
+    : [];
+
+  const rawElements = Array.isArray(obj.elements) ? obj.elements : [];
+  const elements: DesignElement[] = [];
+  for (let i = 0; i < rawElements.length; i++) {
+    const normalized = sanitizeElementForMigration(rawElements[i], i);
+    if (normalized) elements.push(normalized);
+  }
+
+  return {
+    version: PROJECT_FILE_VERSION,
+    name,
+    platform,
+    layoutMode,
+    canvasWidth,
+    canvasHeight,
+    canvasBg: typeof obj.canvasBg === 'string' ? obj.canvasBg : undefined,
+    canvasPattern: typeof obj.canvasPattern === 'string' ? (obj.canvasPattern as BgPattern) : 'none',
+    swatches,
+    guides,
+    elements,
+    customBlueprints,
+  };
+}
 
 const ACTIVE_PROJECT_KEY = 'dbx_active_project';
 const MAX_HISTORY_ENTRIES = 60;
@@ -44,27 +162,19 @@ export function loadInitialProjectFromStorage(): InitialProjectBootstrap {
   try {
     const saved = localStorage.getItem(ACTIVE_PROJECT_KEY);
     if (saved) {
-      const parsed = JSON.parse(saved) as Partial<ProjectFile>;
+      const parsed = migrateProjectPayload(JSON.parse(saved));
       return {
-        elements: Array.isArray(parsed.elements) ? parsed.elements : [],
-        name: typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name : 'Canvas Draft',
+        elements: parsed.elements,
+        name: parsed.name,
         platform: parsed.platform,
         layoutMode: parsed.layoutMode,
-        canvasWidth:
-          typeof parsed.canvasWidth === 'number' && parsed.canvasWidth >= 200
-            ? parsed.canvasWidth
-            : undefined,
-        canvasHeight:
-          typeof parsed.canvasHeight === 'number' && parsed.canvasHeight >= 200
-            ? parsed.canvasHeight
-            : undefined,
-        canvasBg: typeof parsed.canvasBg === 'string' ? parsed.canvasBg : undefined,
+        canvasWidth: parsed.canvasWidth,
+        canvasHeight: parsed.canvasHeight,
+        canvasBg: parsed.canvasBg,
         canvasPattern: parsed.canvasPattern,
-        swatches: Array.isArray(parsed.swatches) ? parsed.swatches : undefined,
-        guides: Array.isArray(parsed.guides) ? parsed.guides : undefined,
-        customBlueprints: Array.isArray(parsed.customBlueprints)
-          ? parsed.customBlueprints
-          : undefined,
+        swatches: parsed.swatches,
+        guides: parsed.guides,
+        customBlueprints: parsed.customBlueprints,
       };
     }
   } catch {
@@ -147,7 +257,7 @@ export function useProjectHistory({
     (overrideElements?: DesignElement[], overrideName?: string): ProjectFile => {
       const m = metaRef.current;
       return {
-        version: '1.4.0',
+        version: PROJECT_FILE_VERSION,
         name: overrideName || projectNameRef.current || `designbox-${m.platform}`,
         platform: m.platform,
         layoutMode: m.layoutMode,
@@ -253,10 +363,35 @@ export function useProjectHistory({
     void refreshDesktopLists();
   }, [refreshDesktopLists]);
 
-  // Auto-save active project to localStorage safely (handles QuotaExceededError cleanly)
+  const pendingAutosaveRef = useRef<ProjectFile | null>(null);
+
+  const flushPendingAutosave = useCallback(() => {
+    const payload = pendingAutosaveRef.current;
+    if (!payload) return;
+    pendingAutosaveRef.current = null;
+    try {
+      localStorage.setItem(ACTIVE_PROJECT_KEY, JSON.stringify(payload));
+    } catch {
+      flashSaveNotice(
+        'Browser storage quota full (large Base64 images). Save to disk (.dbx.json) or switch images to ImgBB URLs.',
+        5500
+      );
+    }
+  }, [flashSaveNotice]);
+
+  useEffect(() => {
+    const onBeforeUnload = () => flushPendingAutosave();
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      flushPendingAutosave();
+    };
+  }, [flushPendingAutosave]);
+
+  // Debounced auto-save active project to localStorage (avoids blocking drag frames)
   useEffect(() => {
     const payload: ProjectFile = {
-      version: '1.4.0',
+      version: PROJECT_FILE_VERSION,
       name: projectName || `designbox-${projectMeta.platform}`,
       platform: projectMeta.platform,
       layoutMode: projectMeta.layoutMode,
@@ -269,14 +404,9 @@ export function useProjectHistory({
       elements,
       customBlueprints: projectMeta.customBlueprints,
     };
-    try {
-      localStorage.setItem(ACTIVE_PROJECT_KEY, JSON.stringify(payload));
-    } catch {
-      flashSaveNotice(
-        'Browser storage quota full (large Base64 images). Save to disk (.dbx.json) or switch images to ImgBB URLs.',
-        5500
-      );
-    }
+    pendingAutosaveRef.current = payload;
+    const timer = window.setTimeout(flushPendingAutosave, 400);
+    return () => window.clearTimeout(timer);
   }, [
     elements,
     projectName,
@@ -289,7 +419,7 @@ export function useProjectHistory({
     projectMeta.swatches,
     projectMeta.guides,
     projectMeta.customBlueprints,
-    flashSaveNotice,
+    flushPendingAutosave,
   ]);
 
   // Periodic local snapshot every 60 seconds when changes are pending
@@ -315,11 +445,12 @@ export function useProjectHistory({
       if (!Array.isArray(parsed.elements)) {
         throw new Error('Project file is missing elements array.');
       }
-      onApplyProjectMetadata(parsed);
-      resetHistory(parsed.elements);
-      onSelectAfterLoad?.(parsed.elements[0]?.id || null);
+      const normalized = migrateProjectPayload(parsed);
+      onApplyProjectMetadata(normalized);
+      resetHistory(normalized.elements);
+      onSelectAfterLoad?.(normalized.elements[0]?.id || null);
       setCurrentFilePath(filePath);
-      setProjectName(fileName?.replace(/\.(dbx\.)?json$/i, '') || parsed.name || 'Opened Project');
+      setProjectName(fileName?.replace(/\.(dbx\.)?json$/i, '') || normalized.name || 'Opened Project');
       setIsDirty(false);
     },
     [onApplyProjectMetadata, onSelectAfterLoad, resetHistory]
@@ -422,7 +553,7 @@ export function useProjectHistory({
           JSON.stringify(currentPayload)
         );
       }
-      const parsed = JSON.parse(opened.content) as ProjectFile;
+      const parsed = migrateProjectPayload(JSON.parse(opened.content));
       applyOpenedProject(parsed, opened.path, opened.name);
       void refreshDesktopLists();
       flashSaveNotice(`Opened: ${opened.name}`);
@@ -444,7 +575,7 @@ export function useProjectHistory({
       const reader = new FileReader();
       reader.onload = () => {
         try {
-          const parsed = JSON.parse(String(reader.result)) as ProjectFile;
+          const parsed = migrateProjectPayload(JSON.parse(String(reader.result)));
           applyOpenedProject(parsed, null, file.name);
           flashSaveNotice(`Opened: ${file.name}`);
         } catch {
@@ -468,7 +599,7 @@ export function useProjectHistory({
           );
         }
         const opened = await readProjectFileNative(path);
-        const parsed = JSON.parse(opened.content) as ProjectFile;
+        const parsed = migrateProjectPayload(JSON.parse(opened.content));
         applyOpenedProject(parsed, opened.path, opened.name);
         void refreshDesktopLists();
         flashSaveNotice(`Opened recent: ${opened.name}`);
@@ -502,7 +633,7 @@ export function useProjectHistory({
     async (snapshotId: string) => {
       try {
         const raw = await loadLocalSnapshotSafe(snapshotId);
-        const parsed = JSON.parse(raw) as ProjectFile;
+        const parsed = migrateProjectPayload(JSON.parse(raw));
         applyOpenedProject(parsed, currentFilePath, parsed.name);
         flashSaveNotice('Snapshot restored!');
       } catch (err) {
@@ -517,6 +648,37 @@ export function useProjectHistory({
     setCurrentFilePath(null);
     setIsDirty(false);
   }, []);
+
+  const handleExportHtmlFile = useCallback(
+    async (html: string) => {
+      const baseName = (projectNameRef.current || `designbox-${metaRef.current.platform}`)
+        .replace(/[^a-zA-Z0-9._-]+/g, '-')
+        .replace(/\.(dbx\.)?json$/i, '')
+        .replace(/\.html?$/i, '');
+      const suggestedName = `${baseName || 'designbox-export'}.html`;
+
+      if (isTauriRuntime()) {
+        try {
+          const saved = await exportHtmlFileDialog(suggestedName, html);
+          if (!saved) return;
+          flashSaveNotice(`Exported HTML: ${saved.name}`);
+          return;
+        } catch {
+          // Fall through to browser Blob download
+        }
+      }
+
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = suggestedName;
+      a.click();
+      URL.revokeObjectURL(url);
+      flashSaveNotice(`Downloaded HTML: ${suggestedName}`);
+    },
+    [flashSaveNotice]
+  );
 
   useEffect(() => {
     return () => {
@@ -553,6 +715,7 @@ export function useProjectHistory({
     refreshDesktopLists,
     handleSaveProject,
     handleSaveProjectAs,
+    handleExportHtmlFile,
     handleOpenProjectNative,
     handleOpenProjectFromFileInput,
     handleOpenRecentProject,

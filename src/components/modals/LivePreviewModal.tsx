@@ -17,6 +17,7 @@ export interface LivePreviewModalProps {
   onChangeSurface: (surface: PreviewSurface) => void;
   onChangeViewport: (viewport: PreviewViewport) => void;
   onClose: () => void;
+  onExportHtml: () => void;
 }
 
 export const LivePreviewModal: React.FC<LivePreviewModalProps> = ({
@@ -33,6 +34,7 @@ export const LivePreviewModal: React.FC<LivePreviewModalProps> = ({
   onChangeSurface,
   onChangeViewport,
   onClose,
+  onExportHtml,
 }) => {
   if (!open) return null;
 
@@ -148,6 +150,14 @@ export const LivePreviewModal: React.FC<LivePreviewModalProps> = ({
               ))}
             </div>
 
+            <button
+              type="button"
+              onClick={onExportHtml}
+              className="px-2.5 py-1 rounded-[5px] text-[11px] font-semibold bg-emerald-600 text-white hover:bg-emerald-500 transition"
+              title="Save exported standalone .html file"
+            >
+              Save .HTML
+            </button>
             <button
               onClick={onClose}
               style={{

@@ -62,6 +62,17 @@ export async function saveProjectDialogNative(
   });
 }
 
+export async function exportHtmlFileDialog(
+  suggestedName: string,
+  html: string
+): Promise<SavedProjectPayload | null> {
+  if (!isTauriRuntime()) return null;
+  return invokeTauri<SavedProjectPayload | null>('export_html_dialog', {
+    suggestedName,
+    html,
+  });
+}
+
 export async function saveProjectAtPathNative(
   path: string,
   content: string

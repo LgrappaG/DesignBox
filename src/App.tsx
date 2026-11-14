@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { CanvasStage } from './components/CanvasStage';
 import { LeftSidebar, LeftSidebarTab } from './components/LeftSidebar';
 import { createDefaultModifier } from './components/ModifierStackSection';
@@ -50,6 +50,10 @@ import {
   buildElementFromAssetPreset,
   buildElementFromFaIcon,
 } from './utils/elementFactory';
+import {
+  cloneElementsHierarchy,
+  groupSelectedElementsIntoContainer,
+} from './utils/elementHierarchy';
 import { processLocalImageFile } from './utils/imageUpload';
 import {
   buildCuteThemeCssVars,
@@ -157,7 +161,11 @@ export default function App() {
   // Selection & Workspace UI State
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [clipboardEl, setClipboardEl] = useState<DesignElement | null>(null);
+  const [clipboardBundle, setClipboardBundle] = useState<{
+    elements: DesignElement[];
+    rootIds: string[];
+  } | null>(null);
+  const pasteSeqRef = useRef(0);
   const [copiedStyle, setCopiedStyle] = useState<Partial<DesignElement> | null>(null);
   const [spotlightOpen, setSpotlightOpen] = useState<boolean>(false);
   const [inlineEditId, setInlineEditId] = useState<string | null>(null);
@@ -362,6 +370,7 @@ export default function App() {
     lastSnapshotAt,
     handleSaveProject,
     handleSaveProjectAs,
+    handleExportHtmlFile,
     handleOpenProjectNative,
     handleOpenProjectFromFileInput,
     handleOpenRecentProject,
@@ -481,19 +490,128 @@ export default function App() {
     );
   }, [elements, platform]);
 
-  const exportResult = useMemo(
-    () =>
-      generatePlatformExport(
-        elements,
-        layoutMode,
-        platform,
-        canvasWidth,
-        canvasHeight,
-        canvasBg,
-        canvasPattern
-      ),
-    [elements, layoutMode, platform, canvasWidth, canvasHeight, canvasBg, canvasPattern]
+  // Viewport & Canvas Pointer Hooks (placed above exportResult so active drag gates HTML generation)
+  const {
+    zoom,
+    setZoom,
+    panOffset,
+    setPanOffset,
+    viewportSize,
+    effectiveCanvasHeight,
+    canvasScreenLeft,
+    canvasScreenTop,
+    cursorCoords,
+    setCursorCoords,
+    cursorInViewport,
+    setCursorInViewport,
+    isSpacePressed,
+    setIsSpacePressed,
+    panDrag,
+    setPanDrag,
+    clampPan,
+    zoomTo,
+    fitCanvasToView,
+    centerCanvasView,
+    clientToCanvas,
+  } = useViewportNavigation({
+    canvasWidth,
+    canvasHeight,
+    layoutMode,
+    leftCollapsed,
+    rightCollapsed,
+    bottomDockOpen,
+    canvasViewportRef,
+    canvasTransformRef,
+  });
+
+  const {
+    dragState,
+    marqueeSelect,
+    setMarqueeSelect,
+    drawMarquee,
+    setDrawMarquee,
+    splitDragState,
+    setSplitDragState,
+    dropTargetContainerId,
+    snapLines,
+    spacingBadges,
+    guideDragState,
+    startGuideDrag,
+    panelResizeDrag,
+    setPanelResizeDrag,
+    handlePointerDown,
+    handlePointerMove,
+    handlePointerUp,
+  } = useCanvasPointer({
+    elements,
+    elementsRef,
+    layoutMode,
+    canvasWidth,
+    canvasHeight,
+    zoom,
+    magneticSnap,
+    autoNestDrop,
+    canvasTool,
+    setCanvasTool,
+    editingContainer,
+    selectedIds,
+    setSelectedId,
+    setSelectedIds,
+    inlineEditId,
+    setInlineEditId,
+    isSpacePressed,
+    panDrag,
+    setPanDrag,
+    setPanOffset,
+    clampPan,
+    setCursorCoords,
+    setCursorInViewport,
+    clientToCanvas,
+    canvasViewportRef,
+    leftSplitContainerRef,
+    replaceElementsTransient,
+    commitElements,
+    commitLatestElements,
+    setLeftPanelWidth,
+    setRightPanelWidth,
+    setBottomDockHeight,
+    setLeftLibraryPct,
+    guides,
+    onChangeGuides: setGuides,
+  });
+
+  const isCanvasDragging = Boolean(
+    dragState || splitDragState || guideDragState || panelResizeDrag || drawMarquee
   );
+  const deferredElements = useDeferredValue(elements);
+  const exportSourceElements = isCanvasDragging ? deferredElements : elements;
+  const lastExportRef = useRef<ReturnType<typeof generatePlatformExport> | null>(null);
+
+  const exportResult = useMemo(() => {
+    if (isCanvasDragging && lastExportRef.current) {
+      return lastExportRef.current;
+    }
+    const next = generatePlatformExport(
+      exportSourceElements,
+      layoutMode,
+      platform,
+      canvasWidth,
+      canvasHeight,
+      canvasBg,
+      canvasPattern
+    );
+    lastExportRef.current = next;
+    return next;
+  }, [
+    isCanvasDragging,
+    exportSourceElements,
+    layoutMode,
+    platform,
+    canvasWidth,
+    canvasHeight,
+    canvasBg,
+    canvasPattern,
+  ]);
 
   const previewSrcDoc = useMemo(() => {
     const cute = studioPrefs.cuteThemeColors;
@@ -643,6 +761,7 @@ export default function App() {
 
     const bsFallbackCss = isTh
       ? `
+      .collapse:not(.show) { display: none; }
       .container { width: 100%; padding-right: 15px; padding-left: 15px; margin-right: auto; margin-left: auto; }
       .row { display: flex; flex-wrap: wrap; margin-right: -15px; margin-left: -15px; }
       .no-gutters { margin-right: 0; margin-left: 0; }
@@ -1145,96 +1264,6 @@ export default function App() {
     studioPrefs.cuteThemeColors,
   ]);
 
-  // Viewport & Canvas Pointer Hooks
-  const {
-    zoom,
-    setZoom,
-    panOffset,
-    setPanOffset,
-    viewportSize,
-    effectiveCanvasHeight,
-    canvasScreenLeft,
-    canvasScreenTop,
-    cursorCoords,
-    setCursorCoords,
-    cursorInViewport,
-    setCursorInViewport,
-    isSpacePressed,
-    setIsSpacePressed,
-    panDrag,
-    setPanDrag,
-    clampPan,
-    zoomTo,
-    fitCanvasToView,
-    centerCanvasView,
-    clientToCanvas,
-  } = useViewportNavigation({
-    canvasWidth,
-    canvasHeight,
-    layoutMode,
-    leftCollapsed,
-    rightCollapsed,
-    bottomDockOpen,
-    canvasViewportRef,
-    canvasTransformRef,
-  });
-
-  const {
-    dragState,
-    marqueeSelect,
-    setMarqueeSelect,
-    drawMarquee,
-    setDrawMarquee,
-    splitDragState,
-    setSplitDragState,
-    dropTargetContainerId,
-    snapLines,
-    spacingBadges,
-    guideDragState,
-    startGuideDrag,
-    panelResizeDrag,
-    setPanelResizeDrag,
-    handlePointerDown,
-    handlePointerMove,
-    handlePointerUp,
-  } = useCanvasPointer({
-    elements,
-    elementsRef,
-    layoutMode,
-    canvasWidth,
-    canvasHeight,
-    zoom,
-    magneticSnap,
-    autoNestDrop,
-    canvasTool,
-    setCanvasTool,
-    editingContainer,
-    selectedIds,
-    setSelectedId,
-    setSelectedIds,
-    inlineEditId,
-    setInlineEditId,
-    isSpacePressed,
-    panDrag,
-    setPanDrag,
-    setPanOffset,
-    clampPan,
-    setCursorCoords,
-    setCursorInViewport,
-    clientToCanvas,
-    canvasViewportRef,
-    leftSplitContainerRef,
-    replaceElementsTransient,
-    commitElements,
-    commitLatestElements,
-    setLeftPanelWidth,
-    setRightPanelWidth,
-    setBottomDockHeight,
-    setLeftLibraryPct,
-    guides,
-    onChangeGuides: setGuides,
-  });
-
   // Canvas & Element Actions
   const handleResetWorkspaceLayout = () => {
     setLeftPanelWidth(280);
@@ -1362,32 +1391,59 @@ export default function App() {
     updateSelected(copiedStyle);
   }, [copiedStyle, updateSelected]);
 
+  const copySelectedElements = useCallback(() => {
+    const idsToCopy = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
+    if (idsToCopy.length === 0) return;
+    const { clones, rootCloneIds } = cloneElementsHierarchy(elementsRef.current, idsToCopy, {
+      offsetX: 0,
+      offsetY: 0,
+      canvasWidth,
+      canvasHeight,
+    });
+    if (clones.length > 0) {
+      pasteSeqRef.current = 0;
+      setClipboardBundle({ elements: clones, rootIds: rootCloneIds });
+    }
+  }, [canvasHeight, canvasWidth, elementsRef, selectedId, selectedIds]);
+
   const pasteClipboardElement = useCallback(
     (atX?: number, atY?: number) => {
-      if (!clipboardEl) return;
+      if (!clipboardBundle || clipboardBundle.rootIds.length === 0) return;
       const current = elementsRef.current;
-      const nextX =
-        atX !== undefined
-          ? Math.max(0, Math.min(canvasWidth - clipboardEl.width, Math.round(atX)))
-          : Math.min(canvasWidth - clipboardEl.width - 8, clipboardEl.x + 24);
-      const nextY =
-        atY !== undefined
-          ? Math.max(0, Math.min(canvasHeight - clipboardEl.height, Math.round(atY)))
-          : Math.min(canvasHeight - clipboardEl.height - 8, clipboardEl.y);
-      const pasted: DesignElement = {
-        ...clipboardEl,
-        id: `el-${Date.now().toString().slice(-4)}`,
-        label: `${clipboardEl.label} (Pasted)`,
-        x: Math.max(0, nextX),
-        y: Math.max(0, nextY),
-        order: current.length,
-      };
-      commitElements([...current, pasted]);
-      setClipboardEl(pasted);
-      setSelectedId(pasted.id);
-      setSelectedIds([pasted.id]);
+      let offsetX = 24;
+      let offsetY = 24;
+      if (atX !== undefined && atY !== undefined) {
+        const rootSet = new Set(clipboardBundle.rootIds);
+        const roots = clipboardBundle.elements.filter((e) => rootSet.has(e.id));
+        const minX = roots.length > 0 ? Math.min(...roots.map((r) => r.x)) : 0;
+        const minY = roots.length > 0 ? Math.min(...roots.map((r) => r.y)) : 0;
+        offsetX = Math.round(atX - minX);
+        offsetY = Math.round(atY - minY);
+      } else {
+        pasteSeqRef.current += 1;
+        const step = Math.min(8, pasteSeqRef.current) * 24;
+        offsetX = step;
+        offsetY = step;
+      }
+      const { clones, rootCloneIds } = cloneElementsHierarchy(
+        clipboardBundle.elements,
+        clipboardBundle.rootIds,
+        {
+          offsetX,
+          offsetY,
+          canvasWidth,
+          canvasHeight,
+          labelSuffix: ' (Pasted)',
+        }
+      );
+      if (clones.length === 0) return;
+      const maxOrderBase = current.reduce((m, e) => Math.max(m, e.order), -1) + 1;
+      const orderedClones = clones.map((el, idx) => ({ ...el, order: maxOrderBase + idx }));
+      commitElements([...current, ...orderedClones]);
+      setSelectedIds(rootCloneIds);
+      setSelectedId(rootCloneIds[0] || null);
     },
-    [canvasHeight, canvasWidth, clipboardEl, commitElements, elementsRef]
+    [canvasHeight, canvasWidth, clipboardBundle, commitElements, elementsRef]
   );
 
   const selectAllElements = useCallback(() => {
@@ -1432,25 +1488,17 @@ export default function App() {
     const idsToDup = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
     if (idsToDup.length === 0) return;
     const current = elementsRef.current;
-    const itemsToClone = current.filter((e) => idsToDup.includes(e.id));
-    const newItems: DesignElement[] = [];
-    const newIds: string[] = [];
-    itemsToClone.forEach((item, i) => {
-      const newId = `el-${Date.now().toString().slice(-4)}-${i}`;
-      newIds.push(newId);
-      newItems.push({
-        ...item,
-        id: newId,
-        label: `${item.label} (Copy)`,
-        x: Math.min(canvasWidth - item.width - 8, item.x + 20),
-        y: Math.min(canvasHeight - item.height - 8, item.y + 20),
-        zIndex: (item.zIndex || 10) + 1,
-        order: current.length + i,
-      });
+    const { clones, rootCloneIds } = cloneElementsHierarchy(current, idsToDup, {
+      offsetX: 20,
+      offsetY: 20,
+      canvasWidth,
+      canvasHeight,
+      labelSuffix: ' (Copy)',
     });
-    commitElements([...current, ...newItems]);
-    setSelectedIds(newIds);
-    setSelectedId(newIds[0] || null);
+    if (clones.length === 0) return;
+    commitElements([...current, ...clones]);
+    setSelectedIds(rootCloneIds);
+    setSelectedId(rootCloneIds[0] || null);
   }, [canvasHeight, canvasWidth, commitElements, elementsRef, selectedId, selectedIds]);
 
   const deleteSelected = useCallback(() => {
@@ -1676,49 +1724,17 @@ export default function App() {
   };
 
   const groupSelectedIntoBox = () => {
-    const selected = elements.filter((e) => selectedIds.includes(e.id));
-    if (selected.length < 2) return;
-    const minX = Math.min(...selected.map((e) => e.x));
-    const minY = Math.min(...selected.map((e) => e.y));
-    const maxX = Math.max(...selected.map((e) => e.x + e.width));
-    const maxY = Math.max(...selected.map((e) => e.y + e.height));
-    const pad = 16;
-    const boxId = `box-group-${Date.now().toString().slice(-4)}`;
-    const isLight = uiTheme !== 'carbon';
-    const newBox: DesignElement = {
-      id: boxId,
-      type: 'box',
-      label: `Group Box (${selected.length} items)`,
-      content: '',
-      x: Math.max(0, minX - pad),
-      y: Math.max(0, minY - pad),
-      width: Math.min(canvasWidth, maxX - minX + pad * 2),
-      height: Math.min(canvasHeight, maxY - minY + pad * 2),
-      zIndex: Math.max(1, Math.min(...selected.map((e) => e.zIndex || 10)) - 1),
-      opacity: 100,
-      order: elements.length,
-      rowIndex: Math.max(...elements.map((e) => e.rowIndex), 0) + 1,
-      colSpan: 12,
-      bgColor: isLight ? '#F2EFE9' : '#242220',
-      textColor: isLight ? '#2C2A28' : '#ECE7DF',
-      borderColor: isLight ? '#C86D51' : '#B85D3B',
-      borderWidth: 1,
-      borderStyle: 'solid',
-      borderRadius: 10,
-      padding: 12,
-      fontSize: 13,
-      fontWeight: 'medium',
-      textAlign: 'left',
-      shadow: 'none',
-      hoverEffect: 'none',
-      containerLayout: 'freeform_offset',
-    };
-    const updated = elements.map((el) =>
-      selectedIds.includes(el.id) ? { ...el, parentId: boxId } : el
-    );
-    commitElements([...updated, newBox]);
-    setSelectedId(boxId);
-    setSelectedIds([boxId]);
+    const { elements: nextElements, containerId } = groupSelectedElementsIntoContainer({
+      elements,
+      selectedIds,
+      uiTheme,
+      canvasWidth,
+      canvasHeight,
+    });
+    if (!containerId) return;
+    commitElements(nextElements);
+    setSelectedId(containerId);
+    setSelectedIds([containerId]);
   };
 
   const subtractSelectedElements = () => {
@@ -2191,10 +2207,28 @@ export default function App() {
     }
   };
 
+  const computeLatestExportHtml = useCallback(
+    () =>
+      generatePlatformExport(
+        elementsRef.current,
+        layoutMode,
+        platform,
+        canvasWidth,
+        canvasHeight,
+        canvasBg,
+        canvasPattern
+      ).html,
+    [canvasBg, canvasHeight, canvasPattern, canvasWidth, elementsRef, layoutMode, platform]
+  );
+
   const handleCopyCode = () => {
-    void navigator.clipboard.writeText(exportResult.html);
+    void navigator.clipboard.writeText(computeLatestExportHtml());
     setCopied(true);
     window.setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleExportHtml = () => {
+    void handleExportHtmlFile(computeLatestExportHtml());
   };
 
   const saveImgbbKey = (val: string) => {
@@ -2377,11 +2411,11 @@ export default function App() {
         return;
       }
       if (matchesShortcut(e, keybindings.copy)) {
-        if (selectedElement) setClipboardEl(selectedElement);
+        copySelectedElements();
         return;
       }
       if (matchesShortcut(e, keybindings.paste)) {
-        if (clipboardEl) {
+        if (clipboardBundle) {
           e.preventDefault();
           pasteClipboardElement();
         }
@@ -2567,8 +2601,9 @@ export default function App() {
     canvasHeight,
     canvasTool,
     canvasWidth,
-    clipboardEl,
+    clipboardBundle,
     commitWithUpdater,
+    copySelectedElements,
     copySelectedStyle,
     deleteSelected,
     duplicateSelected,
@@ -2840,12 +2875,12 @@ export default function App() {
           onToggleHide={toggleHide}
           onUnlockAll={unlockAllElements}
           onSelectAll={selectAllElements}
-          onCopySelected={() => selectedElement && setClipboardEl(selectedElement)}
+          onCopySelected={copySelectedElements}
           onPasteAtPosition={pasteClipboardElement}
           onCopyStyle={copySelectedStyle}
           onPasteStyle={pasteStyleToSelected}
           hasCopiedStyle={Boolean(copiedStyle)}
-          hasClipboardElement={Boolean(clipboardEl)}
+          hasClipboardElement={Boolean(clipboardBundle)}
           onRotateSelected90={rotateSelected90}
           onFlipSelected={flipSelected}
           onPopOutFromContainer={popOutFromContainer}
@@ -2915,6 +2950,7 @@ export default function App() {
           onResetBottomDockHeight={() => setBottomDockHeight(230)}
           onChangePlatform={setPlatform}
           onCopyCode={handleCopyCode}
+          onExportHtml={handleExportHtml}
           onChangePreviewSurface={setPreviewSurface}
           onChangePreviewViewport={setPreviewViewport}
           onOpenRightCodeTab={() => {
@@ -2997,6 +3033,7 @@ export default function App() {
           onRemoveSwatch={(hex) => setSwatches((prev) => prev.filter((c) => c !== hex))}
           onChangePlatform={setPlatform}
           onCopyCode={handleCopyCode}
+          onExportHtml={handleExportHtml}
         />
       </div>
 
@@ -3081,6 +3118,7 @@ export default function App() {
         onChangeSurface={setPreviewSurface}
         onChangeViewport={setPreviewViewport}
         onClose={() => setShowLivePreviewModal(false)}
+        onExportHtml={handleExportHtml}
       />
 
       {!isTauriRuntime() && saveNotice && (

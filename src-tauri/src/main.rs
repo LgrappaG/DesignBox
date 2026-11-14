@@ -115,6 +115,40 @@ fn sanitize_basename(filename: &str, fallback: &str) -> String {
     }
 }
 
+fn write_file_atomic(target: &Path, content: &str) -> Result<(), String> {
+    use std::io::Write;
+    if let Some(parent) = target.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create parent directory: {}", e))?;
+        }
+    }
+    let file_name = target
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("designbox");
+    let tmp_path = target.with_file_name(format!(".{}.{}.tmp", file_name, now_epoch_ms()));
+    {
+        let mut file = std::fs::File::create(&tmp_path)
+            .map_err(|e| format!("Failed to create temp file: {}", e))?;
+        file.write_all(content.as_bytes())
+            .map_err(|e| format!("Failed to write temp file: {}", e))?;
+        let _ = file.sync_all();
+    }
+    if let Err(rename_err) = std::fs::rename(&tmp_path, target) {
+        if target.exists() {
+            std::fs::copy(&tmp_path, target).map_err(|copy_err| {
+                format!("Failed to replace target file ({}): {}", rename_err, copy_err)
+            })?;
+            let _ = std::fs::remove_file(&tmp_path);
+        } else {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(format!("Failed to finalize temp file: {}", rename_err));
+        }
+    }
+    Ok(())
+}
+
 fn record_recent_project(app: &tauri::AppHandle, path_str: &str) -> Result<(), String> {
     let index_path = recent_index_path(app)?;
     let mut entries: Vec<RecentProjectEntry> = if index_path.exists() {
@@ -138,8 +172,7 @@ fn record_recent_project(app: &tauri::AppHandle, path_str: &str) -> Result<(), S
 
     let serialized = serde_json::to_string_pretty(&entries)
         .map_err(|e| format!("Failed to serialize recent projects: {}", e))?;
-    std::fs::write(&index_path, serialized)
-        .map_err(|e| format!("Failed to write recent projects: {}", e))?;
+    write_file_atomic(&index_path, &serialized)?;
     Ok(())
 }
 
@@ -183,113 +216,162 @@ fn validate_platform_snippet(html: String, platform: String) -> ValidationReport
 }
 
 #[tauri::command]
-fn save_project_to_disk(filename: String, content: String) -> Result<String, String> {
-    let base_dir = std::env::var("USERPROFILE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
+async fn save_project_to_disk(filename: String, content: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let base_dir = std::env::var("USERPROFILE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
 
-    let downloads_dir = base_dir.join("Downloads");
-    let target_dir = if downloads_dir.exists() {
-        downloads_dir
-    } else {
-        base_dir.join("Desktop")
-    };
+        let downloads_dir = base_dir.join("Downloads");
+        let target_dir = if downloads_dir.exists() {
+            downloads_dir
+        } else {
+            base_dir.join("Desktop")
+        };
 
-    let safe_name = sanitize_basename(&filename, "designbox-project.dbx.json");
-    let full_path = target_dir.join(safe_name);
-    std::fs::write(&full_path, content).map_err(|e| format!("Failed to write file: {}", e))?;
-    Ok(full_path.to_string_lossy().to_string())
+        let safe_name = sanitize_basename(&filename, "designbox-project.dbx.json");
+        let full_path = target_dir.join(safe_name);
+        write_file_atomic(&full_path, &content)?;
+        Ok(full_path.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn open_project_dialog(
+async fn open_project_dialog(
     window: tauri::Window,
     app: tauri::AppHandle,
 ) -> Result<Option<OpenedProjectPayload>, String> {
-    let selected = rfd::FileDialog::new()
-        .set_parent(&window)
-        .set_title("Open DesignBox Project")
-        .add_filter("DesignBox Project", &["dbx", "json"])
-        .pick_file();
+    tauri::async_runtime::spawn_blocking(move || {
+        let selected = rfd::FileDialog::new()
+            .set_parent(&window)
+            .set_title("Open DesignBox Project")
+            .add_filter("DesignBox Project", &["dbx", "json"])
+            .pick_file();
 
-    let Some(path) = selected else {
-        return Ok(None);
-    };
+        let Some(path) = selected else {
+            return Ok(None);
+        };
 
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read project file: {}", e))?;
-    let path_str = path.to_string_lossy().to_string();
-    let _ = record_recent_project(&app, &path_str);
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read project file: {}", e))?;
+        let path_str = path.to_string_lossy().to_string();
+        let _ = record_recent_project(&app, &path_str);
 
-    Ok(Some(OpenedProjectPayload {
-        name: display_name_from_path(&path),
-        path: path_str,
-        content,
-    }))
+        Ok(Some(OpenedProjectPayload {
+            name: display_name_from_path(&path),
+            path: path_str,
+            content,
+        }))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn save_project_dialog(
+async fn save_project_dialog(
     window: tauri::Window,
     app: tauri::AppHandle,
     suggested_name: String,
     content: String,
 ) -> Result<Option<SavedProjectPayload>, String> {
-    let safe_suggested = sanitize_basename(&suggested_name, "designbox-project.dbx.json");
-    let selected = rfd::FileDialog::new()
-        .set_parent(&window)
-        .set_title("Save DesignBox Project As")
-        .set_file_name(&safe_suggested)
-        .add_filter("DesignBox Project", &["dbx", "json"])
-        .save_file();
+    tauri::async_runtime::spawn_blocking(move || {
+        let safe_suggested = sanitize_basename(&suggested_name, "designbox-project.dbx.json");
+        let selected = rfd::FileDialog::new()
+            .set_parent(&window)
+            .set_title("Save DesignBox Project As")
+            .set_file_name(&safe_suggested)
+            .add_filter("DesignBox Project", &["dbx", "json"])
+            .save_file();
 
-    let Some(path) = selected else {
-        return Ok(None);
-    };
+        let Some(path) = selected else {
+            return Ok(None);
+        };
 
-    std::fs::write(&path, &content)
-        .map_err(|e| format!("Failed to save project file: {}", e))?;
-    let path_str = path.to_string_lossy().to_string();
-    let _ = record_recent_project(&app, &path_str);
+        write_file_atomic(&path, &content)?;
+        let path_str = path.to_string_lossy().to_string();
+        let _ = record_recent_project(&app, &path_str);
 
-    Ok(Some(SavedProjectPayload {
-        name: display_name_from_path(&path),
-        path: path_str,
-    }))
+        Ok(Some(SavedProjectPayload {
+            name: display_name_from_path(&path),
+            path: path_str,
+        }))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn save_project_at_path(
+async fn export_html_dialog(
+    window: tauri::Window,
+    suggested_name: String,
+    html: String,
+) -> Result<Option<SavedProjectPayload>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let safe_suggested = sanitize_basename(&suggested_name, "designbox-export.html");
+        let selected = rfd::FileDialog::new()
+            .set_parent(&window)
+            .set_title("Export DesignBox HTML")
+            .set_file_name(&safe_suggested)
+            .add_filter("HTML Document", &["html", "htm"])
+            .save_file();
+
+        let Some(path) = selected else {
+            return Ok(None);
+        };
+
+        write_file_atomic(&path, &html)?;
+        let path_str = path.to_string_lossy().to_string();
+
+        Ok(Some(SavedProjectPayload {
+            name: display_name_from_path(&path),
+            path: path_str,
+        }))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
+async fn save_project_at_path(
     app: tauri::AppHandle,
     path: String,
     content: String,
 ) -> Result<SavedProjectPayload, String> {
-    let target = PathBuf::from(&path);
-    std::fs::write(&target, &content)
-        .map_err(|e| format!("Failed to write project file: {}", e))?;
-    let _ = record_recent_project(&app, &path);
+    tauri::async_runtime::spawn_blocking(move || {
+        let target = PathBuf::from(&path);
+        write_file_atomic(&target, &content)?;
+        let _ = record_recent_project(&app, &path);
 
-    Ok(SavedProjectPayload {
-        name: display_name_from_path(&target),
-        path,
+        Ok(SavedProjectPayload {
+            name: display_name_from_path(&target),
+            path,
+        })
     })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn read_project_file(
+async fn read_project_file(
     app: tauri::AppHandle,
     path: String,
 ) -> Result<OpenedProjectPayload, String> {
-    let target = PathBuf::from(&path);
-    let content = std::fs::read_to_string(&target)
-        .map_err(|e| format!("Failed to read project file: {}", e))?;
-    let _ = record_recent_project(&app, &path);
+    tauri::async_runtime::spawn_blocking(move || {
+        let target = PathBuf::from(&path);
+        let content = std::fs::read_to_string(&target)
+            .map_err(|e| format!("Failed to read project file: {}", e))?;
+        let _ = record_recent_project(&app, &path);
 
-    Ok(OpenedProjectPayload {
-        name: display_name_from_path(&target),
-        path,
-        content,
+        Ok(OpenedProjectPayload {
+            name: display_name_from_path(&target),
+            path,
+            content,
+        })
     })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -332,8 +414,7 @@ fn save_local_snapshot(
     let ts = now_epoch_ms();
     let id = format!("snap_{}.dbx.json", ts);
     let file_path = snap_dir.join(&id);
-    std::fs::write(&file_path, &content)
-        .map_err(|e| format!("Failed to write snapshot file: {}", e))?;
+    write_file_atomic(&file_path, &content)?;
 
     let entry = SnapshotEntry {
         id: id.clone(),
@@ -353,8 +434,7 @@ fn save_local_snapshot(
 
     let serialized = serde_json::to_string_pretty(&entries)
         .map_err(|e| format!("Failed to serialize snapshot index: {}", e))?;
-    std::fs::write(&idx_path, serialized)
-        .map_err(|e| format!("Failed to save snapshot index: {}", e))?;
+    write_file_atomic(&idx_path, &serialized)?;
 
     Ok(entry)
 }
@@ -395,6 +475,7 @@ fn main() {
             save_project_to_disk,
             open_project_dialog,
             save_project_dialog,
+            export_html_dialog,
             save_project_at_path,
             read_project_file,
             get_recent_projects,

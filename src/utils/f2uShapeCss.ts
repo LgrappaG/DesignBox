@@ -222,3 +222,50 @@ export function buildF2URadialCutoutCss(
     'background-repeat: repeat-x',
   ].join('; ');
 }
+
+/**
+ * Inverse radial cutout overlay for F2U images / textured surfaces (paints maskBgColor in the cutouts
+ * over a center transparent window so no clip-path or SVG is needed).
+ */
+export function buildF2URadialMaskOverlayCss(
+  kind: 'ticket' | 'cross_star' | 'scallop' | 'star',
+  maskBgColor: string
+): string {
+  const safeMask = maskBgColor && maskBgColor !== 'transparent' ? maskBgColor : '#FAF8F5';
+
+  if (kind === 'ticket') {
+    const notchLeft = `radial-gradient(circle at 0% 50%, ${safeMask} 12px, transparent 12.6px)`;
+    const notchRight = `radial-gradient(circle at 100% 50%, ${safeMask} 12px, transparent 12.6px)`;
+    return [
+      `background-image: ${notchLeft}, ${notchRight}`,
+      'background-position: left center, right center',
+      'background-size: 51% 100%',
+      'background-repeat: no-repeat',
+      'pointer-events: none',
+    ].join('; ');
+  }
+
+  if (kind === 'cross_star' || kind === 'star') {
+    const scoopPct = kind === 'star' ? '42%' : '48%';
+    const edgePct = kind === 'star' ? '43%' : '49%';
+    const tl = `radial-gradient(circle at 0% 0%, ${safeMask} ${scoopPct}, transparent ${edgePct})`;
+    const tr = `radial-gradient(circle at 100% 0%, ${safeMask} ${scoopPct}, transparent ${edgePct})`;
+    const bl = `radial-gradient(circle at 0% 100%, ${safeMask} ${scoopPct}, transparent ${edgePct})`;
+    const br = `radial-gradient(circle at 100% 100%, ${safeMask} ${scoopPct}, transparent ${edgePct})`;
+    return [
+      `background-image: ${tl}, ${tr}, ${bl}, ${br}`,
+      'background-position: top left, top right, bottom left, bottom right',
+      'background-size: 51% 51%',
+      'background-repeat: no-repeat',
+      'pointer-events: none',
+    ].join('; ');
+  }
+
+  // Scallop inverse mask
+  return [
+    `background-image: radial-gradient(circle at 50% 0%, ${safeMask} 8px, transparent 8.6px), radial-gradient(circle at 50% 100%, ${safeMask} 8px, transparent 8.6px)`,
+    'background-size: 24px 100%',
+    'background-repeat: repeat-x',
+    'pointer-events: none',
+  ].join('; ');
+}

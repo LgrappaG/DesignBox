@@ -17,15 +17,25 @@ import {
   renderOverlayModifiersHTML,
   renderSplitModifierHTML,
 } from './modifierRenderer';
-import { isF2USafeShape, maskElementForF2USimulation } from './f2uShield';
+import {
+  escapeCssUrl,
+  escapeHtmlAttr,
+  isF2USafeShape,
+  maskElementForF2USimulation,
+  sanitizeF2UBodyHtml,
+  sanitizeHrefUrl,
+} from './f2uShield';
 import {
   buildF2UAngledLineCss,
   buildF2UCornerMaskOverlayCss,
   buildF2UQuadrantSurfaceCss,
   buildF2URadialCutoutCss,
+  buildF2URadialMaskOverlayCss,
   isF2UGeometricShape,
   normalizeShapeCutPx,
 } from '../utils/f2uShapeCss';
+
+export { escapeHtmlAttr, escapeCssUrl, sanitizeHrefUrl };
 
 function encodeRoundTripPayload(payload: unknown): string {
   const json = JSON.stringify(payload);
@@ -101,12 +111,73 @@ export function getFontAwesomeFlipClass(flipH?: boolean, flipV?: boolean): strin
   return '';
 }
 
-function escapeHtmlAttr(val: string): string {
-  return val
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+function sanitizeElementTextForExport(el: DesignElement, isToyhouseFree: boolean): DesignElement {
+  return {
+    ...el,
+    content: sanitizeF2UBodyHtml(el.content || ''),
+    subContent: el.subContent !== undefined ? sanitizeF2UBodyHtml(el.subContent) : undefined,
+    collapseHeader:
+      el.collapseHeader !== undefined ? sanitizeF2UBodyHtml(el.collapseHeader) : undefined,
+    rawInnerHtml:
+      el.rawInnerHtml !== undefined
+        ? isToyhouseFree
+          ? sanitizeF2UBodyHtml(el.rawInnerHtml)
+          : el.rawInnerHtml.replace(/<(script|iframe|object|embed)\b[^>]*>[\s\S]*?<\/\1>/gi, '').replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+        : undefined,
+    tabs: el.tabs?.map((t) => ({
+      ...t,
+      title: sanitizeF2UBodyHtml(t.title),
+      content: sanitizeF2UBodyHtml(t.content),
+    })),
+    gallery: el.gallery?.map((g) => ({
+      ...g,
+      caption: g.caption !== undefined ? sanitizeF2UBodyHtml(g.caption) : undefined,
+    })),
+    relationNodes: el.relationNodes?.map((n) => ({
+      ...n,
+      name: sanitizeF2UBodyHtml(n.name),
+      role: sanitizeF2UBodyHtml(n.role),
+      desc: n.desc !== undefined ? sanitizeF2UBodyHtml(n.desc) : undefined,
+    })),
+  };
+}
+
+function renderLightboxMarkup(params: {
+  lbId: string;
+  triggerHtml: string;
+  fullImageUrl: string;
+  altText: string;
+  captionHtml?: string;
+  isToyhouse: boolean;
+  isToyhouseFree: boolean;
+  fillBox?: boolean;
+}): string {
+  const {
+    lbId,
+    triggerHtml,
+    fullImageUrl,
+    altText,
+    captionHtml,
+    isToyhouse,
+    isToyhouseFree,
+    fillBox = false,
+  } = params;
+  const safeId = lbId.replace(/[^a-zA-Z0-9_-]/g, '') || 'dbx-lb-item';
+  const safeImgSrc = sanitizeHrefUrl(fullImageUrl);
+  const safeAlt = escapeHtmlAttr(altText);
+
+  if (isToyhouse) {
+    const triggerStyle = fillBox
+      ? 'width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: zoom-in; text-decoration: none; color: inherit;'
+      : 'display: block; width: 100%; cursor: zoom-in; text-decoration: none; color: inherit;';
+    const blurCss = isToyhouseFree ? '' : ' backdrop-filter: blur(5px);';
+    return `<a href="#${safeId}" data-toggle="collapse" role="button" aria-expanded="false" aria-controls="${safeId}" style="${triggerStyle}">${triggerHtml}</a><div id="${safeId}" class="collapse" style="position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 999999;"><a href="#${safeId}" data-toggle="collapse" role="button" aria-label="Close Lightbox" style="width: 100%; height: 100%; background: rgba(14,13,12,0.92);${blurCss} display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; cursor: zoom-out; text-decoration: none; color: inherit;"><img src="${safeImgSrc}" alt="${safeAlt}" style="max-width: 90vw; max-height: 84vh; object-fit: contain; border-radius: 8px; box-shadow: 0 16px 48px rgba(0,0,0,0.7);" />${captionHtml ? `<div style="color: #fff; margin-top: 10px; font-size: 13px; font-weight: 600;">${captionHtml}</div>` : ''}<div style="color: rgba(255,255,255,0.75); font-size: 11px; margin-top: 6px; padding: 3px 10px; border-radius: 999px; background: rgba(255,255,255,0.12);">Click anywhere to dismiss</div></a></div>`;
+  }
+
+  const summaryStyle = fillBox
+    ? 'width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: zoom-in; list-style: none;'
+    : 'cursor: zoom-in; list-style: none; outline: none;';
+  return `<details class="dbx-lightbox-details" style="${fillBox ? 'width: 100%; height: 100%;' : 'position: relative; width: 100%;'}"><summary style="${summaryStyle}">${triggerHtml}</summary><div style="position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 999999; background: rgba(14,13,12,0.88); backdrop-filter: blur(5px); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; cursor: zoom-out;" onclick="this.parentElement.removeAttribute('open')"><img src="${safeImgSrc}" alt="${safeAlt}" style="max-width: 90vw; max-height: 84vh; object-fit: contain; border-radius: 8px; box-shadow: 0 16px 48px rgba(0,0,0,0.7);" />${captionHtml ? `<div style="color: #fff; margin-top: 10px; font-size: 13px; font-weight: 600;">${captionHtml}</div>` : ''}<div style="color: rgba(255,255,255,0.6); font-size: 11px; margin-top: 4px;">Click anywhere to dismiss</div></div></details>`;
 }
 
 export function getShapeBorderRadiusOverride(shape?: ImageShape): string {
@@ -243,7 +314,8 @@ export function getBackgroundPatternCSS(
 export function getSurfaceBackgroundCSS(el: DesignElement): string {
   const styles: string[] = [`background-color: ${el.bgColor}`];
   const hasGradient = Boolean(el.bgGradientTo && el.bgGradientTo !== '' && el.bgGradientTo !== el.bgColor);
-  const hasBgImg = Boolean(el.bgImageUrl && el.bgImageUrl.trim());
+  const safeBgUrl = escapeCssUrl(el.bgImageUrl);
+  const hasBgImg = Boolean(safeBgUrl);
 
   let gradExpr = '';
   if (hasGradient) {
@@ -258,13 +330,13 @@ export function getSurfaceBackgroundCSS(el: DesignElement): string {
   }
 
   if (hasBgImg && hasGradient) {
-    styles.push(`background-image: ${gradExpr}, url('${escapeHtmlAttr(el.bgImageUrl!.trim())}')`);
+    styles.push(`background-image: ${gradExpr}, url('${safeBgUrl}')`);
     styles.push(`background-size: auto, ${el.bgSize || 'cover'}`);
     styles.push(`background-position: center, ${el.bgPosition || 'center center'}`);
     styles.push(`background-repeat: no-repeat, ${el.bgRepeat || 'no-repeat'}`);
     if (el.bgAttachment === 'fixed') styles.push('background-attachment: scroll, fixed');
   } else if (hasBgImg) {
-    styles.push(`background-image: url('${escapeHtmlAttr(el.bgImageUrl!.trim())}')`);
+    styles.push(`background-image: url('${safeBgUrl}')`);
     styles.push(`background-size: ${el.bgSize || 'cover'}`);
     styles.push(`background-position: ${el.bgPosition || 'center center'}`);
     styles.push(`background-repeat: ${el.bgRepeat || 'no-repeat'}`);
@@ -528,7 +600,13 @@ ${panels}
     </div>`;
 }
 
-function renderGalleryHTML(el: DesignElement, baseStyle: string, classes: string): string {
+function renderGalleryHTML(
+  el: DesignElement,
+  baseStyle: string,
+  classes: string,
+  isToyhouse: boolean,
+  isToyhouseFree: boolean
+): string {
   const items =
     el.gallery && el.gallery.length > 0
       ? el.gallery
@@ -545,18 +623,23 @@ function renderGalleryHTML(el: DesignElement, baseStyle: string, classes: string
   const imgRadius = el.imageBorderRadius !== undefined ? el.imageBorderRadius : Math.max(4, el.borderRadius);
 
   const cards = items
-    .map((item) => {
-      const imgTag = `<img src="${item.url}" alt="${item.caption || ''}" style="width: 100%; height: ${slotHeight}px; object-fit: ${fit}; display: block;" />`;
+    .map((item, idx) => {
+      const safeUrl = sanitizeHrefUrl(item.url);
+      const safeCapAttr = escapeHtmlAttr(item.caption || '');
+      const imgTag = `<img src="${safeUrl}" alt="${safeCapAttr}" style="width: 100%; height: ${slotHeight}px; object-fit: ${fit}; display: block;" />`;
       let interactiveImg = imgTag;
       if (item.clickAction === 'lightbox') {
-        interactiveImg = `<details class="dbx-lightbox-details" style="position: relative; width: 100%;">
-          <summary style="cursor: pointer; list-style: none; outline: none;">${imgTag}</summary>
-          <div style="position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,0.85); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 16px; cursor: pointer;">
-            <img src="${item.url}" style="max-width: 90vw; max-height: 90vh; object-fit: contain; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);" />
-          </div>
-        </details>`;
+        interactiveImg = renderLightboxMarkup({
+          lbId: `dbx-lb-${el.id}-gal-${idx}`,
+          triggerHtml: imgTag,
+          fullImageUrl: item.url,
+          altText: item.caption || '',
+          captionHtml: item.caption,
+          isToyhouse,
+          isToyhouseFree,
+        });
       } else if (item.linkUrl) {
-        interactiveImg = `<a href="${item.linkUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration: none; display: block; width: 100%;" title="${item.caption || 'Open Link'}">
+        interactiveImg = `<a href="${sanitizeHrefUrl(item.linkUrl)}" target="_blank" rel="noopener noreferrer" style="text-decoration: none; display: block; width: 100%;" title="${escapeHtmlAttr(item.caption || 'Open Link')}">
           ${imgTag}
         </a>`;
       }
@@ -579,7 +662,9 @@ ${cards}
 function renderMoodboardHTML(
   el: DesignElement,
   baseStyle: string,
-  classes: string
+  classes: string,
+  isToyhouse: boolean,
+  isToyhouseFree: boolean
 ): string {
   const items =
     el.gallery && el.gallery.length > 0
@@ -633,19 +718,24 @@ function renderMoodboardHTML(
       const isHeroFirst = layout === 'hero' && idx === 0;
       const currentHeight = isHeroFirst ? slotHeight * 2 + gap : slotHeight;
       const heroSpan = isHeroFirst ? 'grid-row: span 2;' : '';
+      const safeUrl = sanitizeHrefUrl(item.url);
+      const safeCapAttr = escapeHtmlAttr(item.caption || '');
 
-      const imgTag = `<img src="${item.url}" alt="${item.caption || ''}" style="width: 100%; height: ${currentHeight}px; object-fit: ${fit}; border-radius: ${imgRadius}px; border: 1px solid ${el.borderColor || 'rgba(150,140,125,0.3)'}; display: block; transition: transform 0.22s ease, filter 0.22s ease;" />`;
+      const imgTag = `<img src="${safeUrl}" alt="${safeCapAttr}" style="width: 100%; height: ${currentHeight}px; object-fit: ${fit}; border-radius: ${imgRadius}px; border: 1px solid ${el.borderColor || 'rgba(150,140,125,0.3)'}; display: block; transition: transform 0.22s ease, filter 0.22s ease;" />`;
 
       let interactiveImg = imgTag;
       if (item.clickAction === 'lightbox') {
-        interactiveImg = `<details class="dbx-lightbox-details" style="position: relative; width: 100%;">
-          <summary style="cursor: pointer; list-style: none; outline: none;">${imgTag}</summary>
-          <div style="position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,0.85); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 16px; cursor: pointer;">
-            <img src="${item.url}" style="max-width: 90vw; max-height: 90vh; object-fit: contain; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);" />
-          </div>
-        </details>`;
+        interactiveImg = renderLightboxMarkup({
+          lbId: `dbx-lb-${el.id}-mb-${idx}`,
+          triggerHtml: imgTag,
+          fullImageUrl: item.url,
+          altText: item.caption || '',
+          captionHtml: item.caption,
+          isToyhouse,
+          isToyhouseFree,
+        });
       } else if (item.linkUrl) {
-        interactiveImg = `<a href="${item.linkUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration: none; display: block; width: 100%;" title="${item.caption || 'Open Link'}">
+        interactiveImg = `<a href="${sanitizeHrefUrl(item.linkUrl)}" target="_blank" rel="noopener noreferrer" style="text-decoration: none; display: block; width: 100%;" title="${escapeHtmlAttr(item.caption || 'Open Link')}">
           ${imgTag}
         </a>`;
       }
@@ -673,7 +763,8 @@ export function renderInnerElementHTML(
   isToyhouseFree = false
 ): string {
   if (rawEl.hidden) return '';
-  const el = isToyhouseFree ? maskElementForF2USimulation(rawEl) : rawEl;
+  const maskedEl = isToyhouseFree ? maskElementForF2USimulation(rawEl) : rawEl;
+  const el = sanitizeElementTextForExport(maskedEl, isToyhouseFree);
   const children = allElements.filter((c) => c.parentId === el.id && !c.hidden);
   const faAnimClass = isToyhouse ? getFontAwesomeAnimClass(el.idleAnimation) : '';
   const faRotateClass = isToyhouse ? getFontAwesomeRotationClass(el.rotation) : '';
@@ -825,6 +916,20 @@ export function renderInnerElementHTML(
       rawEl.boxClipShape === 'scallop')
       ? rawEl.boxClipShape
       : null;
+
+  const f2uRadialOverlayHtml =
+    isToyhouseFree &&
+    !isImageWithUrl &&
+    hasCustomBgSurface &&
+    !usesF2UPunch &&
+    (rawEl.boxClipShape === 'ticket' ||
+      rawEl.boxClipShape === 'cross_star' ||
+      rawEl.boxClipShape === 'scallop')
+      ? `<div style="position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 5; ${buildF2URadialMaskOverlayCss(
+          rawEl.boxClipShape,
+          el.shapeMaskBgColor || '#FAF8F5'
+        )}"></div>`
+      : '';
 
   const f2uFaVectorShape =
     isToyhouseFree &&
@@ -996,7 +1101,7 @@ export function renderInnerElementHTML(
           out.slice(lastCloseIdx);
       }
     }
-    if (f2uPunchHtml || overlaysHtml || geoCornerOverlayHtml) {
+    if (f2uPunchHtml || overlaysHtml || geoCornerOverlayHtml || f2uRadialOverlayHtml) {
       const insertClose = out.lastIndexOf('</div>') !== -1 ? '</div>' : '</a>';
       const idx = out.lastIndexOf(insertClose);
       if (idx !== -1) {
@@ -1005,6 +1110,7 @@ export function renderInnerElementHTML(
           (f2uPunchHtml ? `\n${f2uPunchHtml}` : '') +
           (overlaysHtml ? `\n${overlaysHtml}` : '') +
           (geoCornerOverlayHtml ? `\n${geoCornerOverlayHtml}` : '') +
+          (f2uRadialOverlayHtml ? `\n${f2uRadialOverlayHtml}` : '') +
           out.slice(idx);
       }
     }
@@ -1013,7 +1119,7 @@ export function renderInnerElementHTML(
       out = `<div class="${classes}" style="${geoOuterShellStyle}">${innerClean}</div>`;
     }
     if (wrapBoxLinkAfterGeo && el.linkUrl && !el.collapsible) {
-      out = `<a href="${el.linkUrl}" target="${el.linkTarget || '_blank'}" rel="noopener noreferrer" style="text-decoration: none; color: inherit; display: block; height: 100%;" title="${escapeHtmlAttr(el.tooltip || el.content || 'Link')}">${out}</a>`;
+      out = `<a href="${sanitizeHrefUrl(el.linkUrl)}" target="${el.linkTarget || '_blank'}" rel="noopener noreferrer" style="text-decoration: none; color: inherit; display: block; height: 100%;" title="${escapeHtmlAttr(el.tooltip || el.content || 'Link')}">${out}</a>`;
     }
     if (maskCss && maskRingOverlaysHtml) {
       out = `<div style="position: relative; width: 100%; height: ${el.autoHeight ? 'auto' : '100%'};">\n${out}\n${maskRingOverlaysHtml}\n</div>`;
@@ -1118,7 +1224,7 @@ export function renderInnerElementHTML(
       return renderTabsHTML(el, isToyhouse, baseStyle, classes, isToyhouseFree);
 
     case 'gallery':
-      return renderGalleryHTML(el, baseStyle, classes);
+      return renderGalleryHTML(el, baseStyle, classes, isToyhouse, isToyhouseFree);
 
     case 'split_box': {
       const parts = (el.subContent || 'Left column content... || Right column content...').split('||');
@@ -1160,7 +1266,7 @@ export function renderInnerElementHTML(
     }
 
     case 'moodboard':
-      return renderMoodboardHTML(el, baseStyle, classes);
+      return renderMoodboardHTML(el, baseStyle, classes, isToyhouse, isToyhouseFree);
 
     case 'rpg_stats': {
       const stats = (el.subContent || 'STR: 12\nDEX: 18\nCON: 14\nINT: 16\nWIS: 15\nCHA: 13')
@@ -1213,7 +1319,7 @@ export function renderInnerElementHTML(
         ${links
           .map((item) => {
             const [label, href] = item.split('|');
-            return `<a href="${(href || '#').trim()}" target="_blank" style="${pillMargin}padding: 5px 12px; border-radius: 999px; background: ${el.borderColor}; color: #fff; text-decoration: none; font-size: 11px; font-weight: 700;">${(label || 'Link').trim()} ↗</a>`;
+            return `<a href="${sanitizeHrefUrl(href, '#')}" target="_blank" rel="noopener noreferrer" style="${pillMargin}padding: 5px 12px; border-radius: 999px; background: ${el.borderColor}; color: #fff; text-decoration: none; font-size: 11px; font-weight: 700;">${sanitizeF2UBodyHtml((label || 'Link').trim())} ↗</a>`;
           })
           .join('')}
       </div>
@@ -1259,7 +1365,7 @@ export function renderInnerElementHTML(
         <div style="font-weight: 700; font-size: ${el.fontSize}px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">♫ ${el.content}</div>
         <div style="font-size: ${Math.max(10, el.fontSize - 2)}px; opacity: 0.75;">${el.subContent || 'Character Theme Track'}</div>
       </div>
-      <a href="${el.url || 'https://youtube.com'}" target="_blank" style="padding: 6px 10px; border-radius: 6px; background: ${el.borderColor}; color: #fff; text-decoration: none; font-size: 11px; font-weight: 700;">▶ PLAY</a>
+      <a href="${sanitizeHrefUrl(el.url, 'https://youtube.com')}" target="_blank" rel="noopener noreferrer" style="padding: 6px 10px; border-radius: 6px; background: ${el.borderColor}; color: #fff; text-decoration: none; font-size: 11px; font-weight: 700;">▶ PLAY</a>
     </div>`;
     }
 
@@ -1267,7 +1373,7 @@ export function renderInnerElementHTML(
       const heartsCount = Math.max(1, Math.min(5, el.relationHearts || 4));
       const heartsStr = '♥'.repeat(heartsCount) + '♡'.repeat(5 - heartsCount);
       return `<div class="${classes}" style="${baseStyle}; flex-direction: row; align-items: center; gap: 12px;">
-      <img src="${el.url || 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=200&auto=format&fit=crop&q=80'}" alt="${el.content}" style="width: 56px; height: 56px; border-radius: 50%; object-fit: cover; border: 2px solid ${el.borderColor}; flex-shrink: 0;" />
+      <img src="${sanitizeHrefUrl(el.url, 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=200&auto=format&fit=crop&q=80')}" alt="${escapeHtmlAttr(el.content || '')}" style="width: 56px; height: 56px; border-radius: 50%; object-fit: cover; border: 2px solid ${el.borderColor}; flex-shrink: 0;" />
       <div style="flex: 1; text-align: left;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <span style="font-weight: 700;">${el.content}</span>
@@ -1319,23 +1425,25 @@ export function renderInnerElementHTML(
   </div>
 </div>`;
 
+      const defaultImg =
+        'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=300&auto=format&fit=crop&q=80';
+      const safeCustomImg = sanitizeHrefUrl(el.url, defaultImg);
+      const safeCustomLink = sanitizeHrefUrl(el.url, '#');
       interpolated = interpolated
-        .replace(/\{\{title\}\}/g, el.content || '')
-        .replace(/\{\{subtitle\}\}/g, el.subContent || '')
-        .replace(
-          /\{\{image\}\}/g,
-          el.url ||
-            'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=300&auto=format&fit=crop&q=80'
-        )
-        .replace(/\{\{link\}\}/g, el.url || '#')
-        .replace(/\{\{accent\}\}/g, el.borderColor || '#C86D51')
-        .replace(/\{\{text\}\}/g, el.textColor || '#2C2A28')
-        .replace(/\{\{bg\}\}/g, el.bgColor || '#F7F5F0');
+        .replace(/\{\{title\}\}/g, () => el.content || '')
+        .replace(/\{\{subtitle\}\}/g, () => el.subContent || '')
+        .replace(/\{\{image\}\}/g, () => safeCustomImg)
+        .replace(/\{\{link\}\}/g, () => safeCustomLink)
+        .replace(/\{\{accent\}\}/g, () => el.borderColor || '#C86D51')
+        .replace(/\{\{text\}\}/g, () => el.textColor || '#2C2A28')
+        .replace(/\{\{bg\}\}/g, () => el.bgColor || '#F7F5F0');
 
-      // Interpolate any user-defined Custom Props (e.g. {{level}}, {{rank}}, {{badge}})
+      // Interpolate any user-defined Custom Props (e.g. {{level}}, {{rank}}, {{badge}}) literally
       if (el.customProps) {
         for (const [k, v] of Object.entries(el.customProps)) {
-          interpolated = interpolated.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), v);
+          const escapedKey = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const safePropVal = sanitizeF2UBodyHtml(v);
+          interpolated = interpolated.replace(new RegExp(`\\{\\{${escapedKey}\\}\\}`, 'g'), () => safePropVal);
         }
       }
 
@@ -1348,15 +1456,42 @@ export function renderInnerElementHTML(
       const activeShape = el.imageShape || el.boxClipShape;
       const isCircle = activeShape === 'circle';
       const clipPath = !isToyhouseFree ? getImageClipPath(activeShape, el.shapeCutPx) : 'none';
+      const imgMaskBg = hasImgGeoBorder ? el.borderColor : el.shapeMaskBgColor || '#FAF8F5';
+      const f2uImgBadgeClass =
+        isToyhouseFree && activeShape === 'star'
+          ? 'fas fa-star'
+          : isToyhouseFree && activeShape === 'heart'
+          ? 'fas fa-heart'
+          : isToyhouseFree && activeShape === 'shield'
+          ? 'fas fa-shield-alt'
+          : '';
+      const f2uImgBadgeHtml = f2uImgBadgeClass
+        ? `<div style="position: absolute; right: 6px; bottom: 6px; z-index: 6; pointer-events: none; width: 22px; height: 22px; border-radius: 50%; background: rgba(20,18,16,0.65); color: ${el.borderColor && el.borderColor !== 'transparent' ? el.borderColor : '#FAF8F5'}; display: flex; align-items: center; justify-content: center; font-size: 11px;"><i class="${f2uImgBadgeClass}"></i></div>`
+        : '';
       const geoImgMaskHtml =
         isToyhouseFree && isF2UGeometricShape(activeShape)
           ? `<div style="position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 5; ${buildF2UCornerMaskOverlayCss(
               activeShape,
-              hasImgGeoBorder ? el.borderColor : el.shapeMaskBgColor || '#FAF8F5',
+              imgMaskBg,
               el.shapeCutPx
             )}"></div>`
-          : '';
+          : isToyhouseFree &&
+            (activeShape === 'ticket' ||
+              activeShape === 'cross_star' ||
+              activeShape === 'scallop' ||
+              activeShape === 'star')
+          ? `<div style="position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 5; ${buildF2URadialMaskOverlayCss(
+              activeShape,
+              imgMaskBg
+            )}"></div>${f2uImgBadgeHtml}`
+          : f2uImgBadgeHtml;
       const shapeRadiusOverride = getShapeBorderRadiusOverride(activeShape);
+      const f2uSilhouetteRadius =
+        isToyhouseFree && activeShape === 'shield'
+          ? '8px 8px 50% 50%'
+          : isToyhouseFree && activeShape === 'heart'
+          ? '50% 50% 42% 42%'
+          : '';
       const isPolaroid = el.frameStyle === 'polaroid' || activeShape === 'polaroid';
       const isFilmstrip = el.frameStyle === 'filmstrip';
       const isStamp = el.frameStyle === 'stamp';
@@ -1365,7 +1500,7 @@ export function renderInnerElementHTML(
       const isVintageGold = el.frameStyle === 'vintage_gold';
       const isNotebook = el.frameStyle === 'notebook';
       const filterCss = getImageFilterCSS(el);
-      const borderRadiusCss = shapeRadiusOverride || getBorderRadiusCSS(el);
+      const borderRadiusCss = f2uSilhouetteRadius || shapeRadiusOverride || getBorderRadiusCSS(el);
 
       const panX = el.panX ?? 50;
       const panY = el.panY ?? 50;
@@ -1405,8 +1540,13 @@ export function renderInnerElementHTML(
           ? `<div style="position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: ${el.overlayColor}; opacity: ${(el.overlayOpacity ?? 0) / 100}; pointer-events: none; border-radius: inherit; z-index: 4;"></div>`
           : '';
 
-      const primaryImgSrc = el.url || 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=500&auto=format&fit=crop&q=80';
-      const hasHoverSwap = el.hoverAction === 'swap_image' && Boolean(el.hoverImageUrl);
+      const primaryImgRaw = el.url || 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=500&auto=format&fit=crop&q=80';
+      const primaryImgSrc = sanitizeHrefUrl(primaryImgRaw, '');
+      const primaryImgCssUrl = escapeCssUrl(primaryImgRaw);
+      const safeHoverCssUrl = escapeCssUrl(el.hoverImageUrl);
+      const safeHoverSrc = sanitizeHrefUrl(el.hoverImageUrl, '');
+      const hasHoverSwap = el.hoverAction === 'swap_image' && Boolean(safeHoverSrc);
+      const safeAltAttr = escapeHtmlAttr(el.content || '');
 
       const useF2UBg = el.imageRenderMode !== 'native_img';
       const zoomPct = Math.round(zoom * 100);
@@ -1457,12 +1597,14 @@ export function renderInnerElementHTML(
         }
         const bgTransformCss =
           bgTransformParts.length > 0 ? `transform: ${bgTransformParts.join(' ')};` : '';
-        const bgCoreStyle = `width: 100%; height: 100%; background-image: url('${primaryImgSrc}'); background-position: ${bgPosition}; background-size: ${bgSize}; background-repeat: no-repeat; border-radius: ${borderRadiusCss}; ${activeClipCss} ${filterCss}; ${blendModeCss} ${bgTransformCss} transition: opacity 0.3s ease;`;
-        const swapBgStyle = hasHoverSwap ? `width: 100%; height: 100%; background-image: url('${el.hoverImageUrl}'); background-position: ${bgPosition}; background-size: ${bgSize}; background-repeat: no-repeat; border-radius: ${borderRadiusCss}; ${activeClipCss} ${filterCss}; ${blendModeCss} ${bgTransformCss} position: absolute; top: 0; right: 0; bottom: 0; left: 0; opacity: 0; transition: opacity 0.3s ease;` : '';
+        const primaryBgImgCss = primaryImgCssUrl ? `background-image: url('${primaryImgCssUrl}'); ` : '';
+        const swapBgImgCss = safeHoverCssUrl ? `background-image: url('${safeHoverCssUrl}'); ` : '';
+        const bgCoreStyle = `width: 100%; height: 100%; ${primaryBgImgCss}background-position: ${bgPosition}; background-size: ${bgSize}; background-repeat: no-repeat; border-radius: ${borderRadiusCss}; ${activeClipCss} ${filterCss}; ${blendModeCss} ${bgTransformCss} transition: opacity 0.3s ease;`;
+        const swapBgStyle = hasHoverSwap && swapBgImgCss ? `width: 100%; height: 100%; ${swapBgImgCss}background-position: ${bgPosition}; background-size: ${bgSize}; background-repeat: no-repeat; border-radius: ${borderRadiusCss}; ${activeClipCss} ${filterCss}; ${blendModeCss} ${bgTransformCss} position: absolute; top: 0; right: 0; bottom: 0; left: 0; opacity: 0; transition: opacity 0.3s ease;` : '';
 
         let bgInner = `
           <div class="${hasHoverSwap ? 'dbx-img-primary-swap' : ''}" style="${bgCoreStyle}"></div>
-          ${hasHoverSwap ? `<div class="dbx-img-swap" style="${swapBgStyle}"></div>` : ''}`;
+          ${swapBgStyle ? `<div class="dbx-img-swap" style="${swapBgStyle}"></div>` : ''}`;
         if (faImgRotateClass) {
           bgInner = `<div class="${faImgRotateClass}" style="width: 100%; height: 100%; position: relative;">${bgInner}</div>`;
         }
@@ -1480,8 +1622,8 @@ export function renderInnerElementHTML(
       } else {
         imgContentHtml = `
         <div style="position: relative; ${circleBoxSizeCss} overflow: hidden; border-radius: ${borderRadiusCss}; display: flex; align-items: center; justify-content: center;">
-          <img class="${hasHoverSwap ? 'dbx-img-primary-swap' : ''}" src="${primaryImgSrc}" alt="${el.content}" style="${imgCoreStyle}" />
-          ${hasHoverSwap ? `<img class="dbx-img-swap" src="${el.hoverImageUrl}" alt="${el.content}" style="${imgCoreStyle} position: absolute; top: 0; right: 0; bottom: 0; left: 0; opacity: 0;" />` : ''}
+          <img class="${hasHoverSwap ? 'dbx-img-primary-swap' : ''}" src="${primaryImgSrc}" alt="${safeAltAttr}" style="${imgCoreStyle}" />
+          ${hasHoverSwap ? `<img class="dbx-img-swap" src="${safeHoverSrc}" alt="${safeAltAttr}" style="${imgCoreStyle} position: absolute; top: 0; right: 0; bottom: 0; left: 0; opacity: 0;" />` : ''}
           ${overlayHtml}
           ${geoImgMaskHtml}
         </div>
@@ -1495,20 +1637,18 @@ export function renderInnerElementHTML(
       // Handle Click Lightbox or Link
       let finalWrappedInner = imgContentHtml;
       if (el.clickAction === 'link') {
-        finalWrappedInner = `<a href="${el.linkUrl || primaryImgSrc}" target="_blank" rel="noopener noreferrer" style="width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-decoration: none; color: inherit; cursor: pointer;">${imgContentHtml}</a>`;
+        finalWrappedInner = `<a href="${sanitizeHrefUrl(el.linkUrl || primaryImgRaw, '#')}" target="_blank" rel="noopener noreferrer" style="width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-decoration: none; color: inherit; cursor: pointer;">${imgContentHtml}</a>`;
       } else if (el.clickAction === 'lightbox') {
-        finalWrappedInner = `
-          <details class="dbx-lightbox-details" style="width: 100%; height: 100%;">
-            <summary style="width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: zoom-in; list-style: none;">
-              ${imgContentHtml}
-            </summary>
-            <div style="position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 999999; background: rgba(14,13,12,0.88); backdrop-filter: blur(5px); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; cursor: zoom-out;" onclick="this.parentElement.removeAttribute('open')">
-              <img src="${primaryImgSrc}" alt="${el.content}" style="max-width: 90vw; max-height: 84vh; object-fit: contain; border-radius: 8px; box-shadow: 0 16px 48px rgba(0,0,0,0.7);" />
-              ${el.content ? `<div style="color: #fff; margin-top: 10px; font-size: 13px; font-weight: 600;">${el.content}</div>` : ''}
-              <div style="color: rgba(255,255,255,0.6); font-size: 11px; margin-top: 4px;">Click anywhere to dismiss</div>
-            </div>
-          </details>
-        `;
+        finalWrappedInner = renderLightboxMarkup({
+          lbId: `dbx-lb-${el.id}`,
+          triggerHtml: imgContentHtml,
+          fullImageUrl: primaryImgRaw,
+          altText: el.content || '',
+          captionHtml: el.content || undefined,
+          isToyhouse,
+          isToyhouseFree,
+          fillBox: true,
+        });
       }
 
       const bgFillStyle = el.asBackgroundFill
@@ -1531,11 +1671,11 @@ export function renderInnerElementHTML(
           el.bgColor && el.bgColor !== 'transparent' ? el.bgColor : el.shapeMaskBgColor || '#FAF8F5',
           el.shapeCutPx
         );
-        return `<a href="${el.url || '#'}" class="${btnCls}" style="${baseStyle}; ${buildF2UQuadrantSurfaceCss(effectiveBoxShape!, el.borderColor, el.shapeCutPx)}; padding: ${Math.max(1, el.borderWidth)}px; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%; '}cursor: pointer;">
+        return `<a href="${sanitizeHrefUrl(el.url, '#')}" class="${btnCls}" style="${baseStyle}; ${buildF2UQuadrantSurfaceCss(effectiveBoxShape!, el.borderColor, el.shapeCutPx)}; padding: ${Math.max(1, el.borderWidth)}px; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%; '}cursor: pointer;">
       <span style="width: 100%; height: 100%; flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; box-sizing: border-box; ${getPaddingCSS(el)}; ${innerBtnBg}">${el.content}</span>
     </a>`;
       }
-      return `<a href="${el.url || '#'}" class="${btnCls}" style="${baseStyle}; flex-direction: row; align-items: center; justify-content: center; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%; '}cursor: pointer;">
+      return `<a href="${sanitizeHrefUrl(el.url, '#')}" class="${btnCls}" style="${baseStyle}; flex-direction: row; align-items: center; justify-content: center; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%; '}cursor: pointer;">
       <span>${el.content}</span>
     </a>`;
     }
@@ -1693,7 +1833,7 @@ ${nodesHtml}
             color: el.borderColor,
           };
           return `        <div style="background: rgba(0,0,0,0.12); border: 1px solid ${el.borderColor}; border-radius: 8px; padding: 8px; display: flex; gap: 8px; align-items: center;">
-          ${node.avatarUrl ? `<img src="${node.avatarUrl}" style="width: 38px; height: 38px; border-radius: 6px; object-fit: cover; border: 1px solid ${meta.color}; shrink: 0;" />` : ''}
+          ${node.avatarUrl ? `<img src="${sanitizeHrefUrl(node.avatarUrl, '')}" alt="${escapeHtmlAttr(node.name)}" style="width: 38px; height: 38px; border-radius: 6px; object-fit: cover; border: 1px solid ${meta.color}; shrink: 0;" />` : ''}
           <div style="flex: 1; min-width: 0;">
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px;">
               <span style="font-weight: 700; font-size: 11px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${node.name}</span>
@@ -1717,7 +1857,10 @@ ${nodesHtml}
     case 'pagedoll': {
       const faAnim = getFontAwesomeAnimClass(el.idleAnimation || 'bounce') || 'fa-bounce';
       const animDur = el.animDuration || 2;
-      const pagedollCore = `<div class="${faAnim}" style="background-image: url('${el.url || 'https://f2.toyhou.se/file/f2-toyhou-se/images/95980873_yi08DhLhBhCs6yr.png'}'); height: 100%; width: 100%; min-height: ${isFreeformFixed ? 0 : 120}px; background-size: contain; background-position: center; background-repeat: no-repeat; animation-duration: ${animDur}s;"></div>`;
+      const safePagedollUrl = escapeCssUrl(
+        el.url || 'https://f2.toyhou.se/file/f2-toyhou-se/images/95980873_yi08DhLhBhCs6yr.png'
+      );
+      const pagedollCore = `<div class="${faAnim}" style="${safePagedollUrl ? `background-image: url('${safePagedollUrl}'); ` : ''}height: 100%; width: 100%; min-height: ${isFreeformFixed ? 0 : 120}px; background-size: contain; background-position: center; background-repeat: no-repeat; animation-duration: ${animDur}s;"></div>`;
       if (faRotateClass || rotationCss) {
         return `<div class="${faRotateClass}" style="width: 100%; height: ${isFreeformFixed ? '100%' : `${el.height}px`}; ${rotationCss}; ${opacityCss};">${pagedollCore}</div>`;
       }
@@ -1778,13 +1921,14 @@ ${nodesHtml}
         !isToyhouseFree && el.type === 'pure_star'
           ? '; clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)'
           : '';
+      const starHasText = Boolean(el.content || el.subContent || nestedChildrenHTML);
       const f2uStarBg =
         isToyhouseFree && el.type === 'pure_star'
-          ? `<div style="position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0;"><i class="fa-solid fa-star" style="font-size: ${Math.max(28, Math.round(Math.min(el.width, el.height) * 0.72))}px; color: ${el.bgColor && el.bgColor !== 'transparent' ? el.bgColor : el.textColor || '#D4A373'}; opacity: 0.28;"></i></div>`
+          ? `<div style="position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0;"><i class="fa-solid fa-star" style="font-size: ${Math.max(28, Math.round(Math.min(el.width, el.height) * 0.72))}px; color: ${el.bgColor && el.bgColor !== 'transparent' ? el.bgColor : el.textColor || '#D4A373'}; opacity: ${starHasText ? 0.28 : 0.88};"></i></div>`
           : '';
       const flexDirOverride = el.type === 'pure_flex_row' || el.type === 'pure_banner' ? '; flex-direction: row; flex-wrap: wrap; align-items: center' : '';
       const rawBody = activeSplit
-        ? renderSplitModifierHTML(el, activeSplit, children, allElements, isToyhouse, isToyhouseFree, renderInnerElementHTML, escapeHtmlAttr)
+        ? renderSplitModifierHTML(el, activeSplit, children, allElements, isToyhouse, isToyhouseFree, renderInnerElementHTML, escapeHtmlAttr, sanitizeF2UBodyHtml)
         : `${f2uStarBg}
         ${el.content || faInlineIconHtml ? `<div style="position: relative; z-index: 1; font-weight: 600;">${faInlineIconHtml}${el.content}</div>` : ''}
         ${el.subContent ? `<div style="position: relative; z-index: 1; ${el.content ? 'margin-top: 4px; ' : ''}font-size: ${Math.max(11, el.fontSize - 1)}px; white-space: pre-line;">${el.subContent}</div>` : ''}${nestedChildrenHTML}`;
@@ -1891,9 +2035,9 @@ ${nodesHtml}
           el.bgColor && el.bgColor !== 'transparent' ? el.bgColor : el.shapeMaskBgColor || '#FAF8F5',
           el.shapeCutPx
         );
-        return `<a href="${escapeHtmlAttr(el.url || '#')}" target="${target}" rel="noopener noreferrer" class="${classes}" style="${baseStyle}; ${buildF2UQuadrantSurfaceCss(effectiveBoxShape!, el.borderColor, el.shapeCutPx)}; padding: ${Math.max(1, el.borderWidth)}px; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%;'}"><span style="width: 100%; height: 100%; flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; box-sizing: border-box; ${getPaddingCSS(el)}; ${innerLinkBg}">${faInlineIconHtml}<span>${el.content || 'Link'}</span></span></a>`;
+        return `<a href="${sanitizeHrefUrl(el.url, '#')}" target="${target}" rel="noopener noreferrer" class="${classes}" style="${baseStyle}; ${buildF2UQuadrantSurfaceCss(effectiveBoxShape!, el.borderColor, el.shapeCutPx)}; padding: ${Math.max(1, el.borderWidth)}px; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%;'}"><span style="width: 100%; height: 100%; flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; box-sizing: border-box; ${getPaddingCSS(el)}; ${innerLinkBg}">${faInlineIconHtml}<span>${el.content || 'Link'}</span></span></a>`;
       }
-      return `<a href="${escapeHtmlAttr(el.url || '#')}" target="${target}" rel="noopener noreferrer" class="${classes}" style="${baseStyle}; flex-direction: row; align-items: center; justify-content: center; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%;'}">${faInlineIconHtml}<span>${el.content || 'Link'}</span></a>`;
+      return `<a href="${sanitizeHrefUrl(el.url, '#')}" target="${target}" rel="noopener noreferrer" class="${classes}" style="${baseStyle}; flex-direction: row; align-items: center; justify-content: center; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%;'}">${faInlineIconHtml}<span>${el.content || 'Link'}</span></a>`;
     }
 
     case 'pure_image_slot': {
@@ -1984,7 +2128,7 @@ ${nodesHtml}
     default: {
       let innerOutput = '';
       if (activeSplit) {
-        const splitBody = renderSplitModifierHTML(el, activeSplit, children, allElements, isToyhouse, isToyhouseFree, renderInnerElementHTML, escapeHtmlAttr);
+        const splitBody = renderSplitModifierHTML(el, activeSplit, children, allElements, isToyhouse, isToyhouseFree, renderInnerElementHTML, escapeHtmlAttr, sanitizeF2UBodyHtml);
         innerOutput = `<div class="${classes}" style="${baseStyle}">${usesF2UPunch ? `<div style="position: relative; z-index: 2; flex: 1; display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0;">${splitBody}</div>` : splitBody}</div>`;
       } else if (el.collapsible) {
         const collInner = `
@@ -2110,7 +2254,6 @@ export function generatePlatformExport(
 
     const hasDiamondOrClip = activeElements.some(
       (e) =>
-        e.type === 'pure_star' ||
         !isF2USafeShape(e.imageShape) ||
         !isF2USafeShape(e.boxClipShape) ||
         (e.customInlineStyle && /clip-path/i.test(e.customInlineStyle))

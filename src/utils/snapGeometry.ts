@@ -18,21 +18,30 @@ interface AxisTarget {
   tolerance: number;
 }
 
+function clampSnapZoom(zoom?: number): number {
+  if (typeof zoom !== 'number' || !Number.isFinite(zoom) || zoom <= 0) return 1;
+  return Math.max(0.25, Math.min(4, zoom));
+}
+
 function collectAxisTargets(
   axis: 'x' | 'y',
   canvasExtent: number,
   others: SnapRect[],
-  guides: CanvasGuide[]
+  guides: CanvasGuide[],
+  zoom = 1
 ): AxisTarget[] {
+  const tolScale = 1 / clampSnapZoom(zoom);
+  const edgeTol = EDGE_SNAP_TOLERANCE * tolScale;
+  const centerTol = CENTER_SNAP_TOLERANCE * tolScale;
   const targets: AxisTarget[] = [
-    { pos: Math.round(canvasExtent / 2), kind: 'center', tolerance: CENTER_SNAP_TOLERANCE },
-    { pos: 0, kind: 'edge', tolerance: EDGE_SNAP_TOLERANCE },
-    { pos: canvasExtent, kind: 'edge', tolerance: EDGE_SNAP_TOLERANCE },
+    { pos: Math.round(canvasExtent / 2), kind: 'center', tolerance: centerTol },
+    { pos: 0, kind: 'edge', tolerance: edgeTol },
+    { pos: canvasExtent, kind: 'edge', tolerance: edgeTol },
   ];
 
   guides.forEach((g) => {
     if (g.axis === axis) {
-      targets.push({ pos: g.pos, kind: 'guide', tolerance: CENTER_SNAP_TOLERANCE });
+      targets.push({ pos: g.pos, kind: 'guide', tolerance: centerTol });
     }
   });
 
@@ -40,9 +49,9 @@ function collectAxisTargets(
     const start = axis === 'x' ? o.x : o.y;
     const size = axis === 'x' ? o.width : o.height;
     targets.push(
-      { pos: Math.round(start + size / 2), kind: 'center', tolerance: EDGE_SNAP_TOLERANCE },
-      { pos: start, kind: 'edge', tolerance: EDGE_SNAP_TOLERANCE },
-      { pos: start + size, kind: 'edge', tolerance: EDGE_SNAP_TOLERANCE }
+      { pos: start, kind: 'edge', tolerance: edgeTol },
+      { pos: start + size, kind: 'edge', tolerance: edgeTol },
+      { pos: Math.round(start + size / 2), kind: 'center', tolerance: edgeTol }
     );
   });
 
@@ -157,6 +166,51 @@ function computeNeighborSpacing(
   return badges;
 }
 
+/** Computes snapped delta for a multi-element selection union bounding box. */
+export function computeMultiSelectMoveDelta(params: {
+  movingRects: ReadonlyArray<SnapRect>;
+  dx: number;
+  dy: number;
+  canvasWidth: number;
+  canvasHeight: number;
+  others: SnapRect[];
+  guides: CanvasGuide[];
+  magneticSnap: boolean;
+  zoom?: number;
+}): { dx: number; dy: number; lines: SnapGuideLine[]; spacing: SnapDistanceBadge[] } {
+  const { movingRects, dx, dy, canvasWidth, canvasHeight, others, guides, magneticSnap, zoom } = params;
+  if (movingRects.length === 0) {
+    return { dx: Math.round(dx), dy: Math.round(dy), lines: [], spacing: [] };
+  }
+  const minX = Math.min(...movingRects.map((r) => r.x));
+  const minY = Math.min(...movingRects.map((r) => r.y));
+  const maxX = Math.max(...movingRects.map((r) => r.x + r.width));
+  const maxY = Math.max(...movingRects.map((r) => r.y + r.height));
+  const unionW = Math.max(1, maxX - minX);
+  const unionH = Math.max(1, maxY - minY);
+
+  const snap = computeSmartMoveSnap({
+    rawX: minX + dx,
+    rawY: minY + dy,
+    width: unionW,
+    height: unionH,
+    canvasWidth,
+    canvasHeight,
+    others,
+    guides,
+    magneticSnap,
+    clampToCanvas: true,
+    zoom,
+  });
+
+  return {
+    dx: snap.x - minX,
+    dy: snap.y - minY,
+    lines: snap.lines,
+    spacing: snap.spacing,
+  };
+}
+
 export function computeSmartMoveSnap(params: {
   rawX: number;
   rawY: number;
@@ -168,6 +222,7 @@ export function computeSmartMoveSnap(params: {
   guides: CanvasGuide[];
   magneticSnap: boolean;
   clampToCanvas?: boolean;
+  zoom?: number;
 }): {
   x: number;
   y: number;
@@ -185,6 +240,7 @@ export function computeSmartMoveSnap(params: {
     guides,
     magneticSnap,
     clampToCanvas = true,
+    zoom = 1,
   } = params;
 
   const boundedX = clampToCanvas
@@ -203,8 +259,8 @@ export function computeSmartMoveSnap(params: {
     };
   }
 
-  const xTargets = collectAxisTargets('x', canvasWidth, others, guides);
-  const yTargets = collectAxisTargets('y', canvasHeight, others, guides);
+  const xTargets = collectAxisTargets('x', canvasWidth, others, guides, zoom);
+  const yTargets = collectAxisTargets('y', canvasHeight, others, guides, zoom);
 
   const snappedX = snapBoxAxis(boundedX, width, xTargets);
   const snappedY = snapBoxAxis(boundedY, height, yTargets);
@@ -244,6 +300,7 @@ export function computeSmartResizeSnap(params: {
   others: SnapRect[];
   guides: CanvasGuide[];
   magneticSnap: boolean;
+  zoom?: number;
 }): {
   x: number;
   y: number;
@@ -266,49 +323,59 @@ export function computeSmartResizeSnap(params: {
     others,
     guides,
     magneticSnap,
+    zoom = 1,
   } = params;
 
-  let newX = origX;
-  let newY = origY;
-  let newW = origW;
-  let newH = origH;
+  const anchorRight = origX + origW;
+  const anchorBottom = origY + origH;
 
-  if (dir.includes('e')) newW = Math.max(minW, origW + dx);
-  if (dir.includes('s')) newH = Math.max(minH, origH + dy);
-  if (dir.includes('w')) {
-    const possibleW = origW - dx;
-    if (possibleW >= minW) {
-      newW = possibleW;
-      newX = origX + dx;
-    }
-  }
-  if (dir.includes('n')) {
-    const possibleH = origH - dy;
-    if (possibleH >= minH) {
-      newH = possibleH;
-      newY = origY + dy;
-    }
+  const snapExtent = (raw: number, minVal: number, maxVal: number): number => {
+    const safeMax = Math.max(minVal, maxVal);
+    if (raw <= minVal) return minVal;
+    const capped = Math.min(safeMax, raw);
+    if (capped >= safeMax) return safeMax;
+    const gridded = Math.round(capped / SNAP_GRID) * SNAP_GRID;
+    return Math.max(minVal, Math.min(safeMax, gridded));
+  };
+
+  let finalX = origX;
+  let finalY = origY;
+  let finalW = origW;
+  let finalH = origH;
+
+  if (dir.includes('e')) {
+    const rawW = origW + dx;
+    finalW = snapExtent(rawW, minW, Math.max(minW, canvasWidth - origX));
+  } else if (dir.includes('w')) {
+    const rawW = origW - dx;
+    finalW = snapExtent(rawW, minW, Math.max(minW, anchorRight));
+    finalX = Math.max(0, anchorRight - finalW);
   }
 
-  let finalX = Math.round(newX / SNAP_GRID) * SNAP_GRID;
-  let finalY = Math.round(newY / SNAP_GRID) * SNAP_GRID;
-  let finalW = Math.round(newW / SNAP_GRID) * SNAP_GRID;
-  let finalH = Math.round(newH / SNAP_GRID) * SNAP_GRID;
+  if (dir.includes('s')) {
+    const rawH = origH + dy;
+    finalH = snapExtent(rawH, minH, Math.max(minH, canvasHeight - origY));
+  } else if (dir.includes('n')) {
+    const rawH = origH - dy;
+    finalH = snapExtent(rawH, minH, Math.max(minH, anchorBottom));
+    finalY = Math.max(0, anchorBottom - finalH);
+  }
+
   const lines: SnapGuideLine[] = [];
 
   if (!magneticSnap) {
     return { x: finalX, y: finalY, width: finalW, height: finalH, lines };
   }
 
-  const xTargets = collectAxisTargets('x', canvasWidth, others, guides);
-  const yTargets = collectAxisTargets('y', canvasHeight, others, guides);
+  const xTargets = collectAxisTargets('x', canvasWidth, others, guides, zoom);
+  const yTargets = collectAxisTargets('y', canvasHeight, others, guides, zoom);
 
   const findEdgeMatch = (val: number, targets: AxisTarget[]): AxisTarget | null => {
     let best: AxisTarget | null = null;
     let bestDist = Infinity;
     for (const t of targets) {
       const dist = Math.abs(val - t.pos);
-      if (dist <= EDGE_SNAP_TOLERANCE && dist < bestDist) {
+      if (dist <= t.tolerance && dist < bestDist) {
         best = t;
         bestDist = dist;
       }
@@ -318,32 +385,30 @@ export function computeSmartResizeSnap(params: {
 
   if (dir.includes('e')) {
     const m = findEdgeMatch(finalX + finalW, xTargets);
-    if (m && m.pos - finalX >= minW) {
+    if (m && m.pos <= canvasWidth && m.pos - finalX >= minW) {
       finalW = Math.round(m.pos - finalX);
       lines.push({ axis: 'x', pos: m.pos, kind: m.kind });
     }
   } else if (dir.includes('w')) {
-    const rightEdge = origX + origW;
     const m = findEdgeMatch(finalX, xTargets);
-    if (m && rightEdge - m.pos >= minW) {
+    if (m && m.pos >= 0 && anchorRight - m.pos >= minW) {
       finalX = Math.round(m.pos);
-      finalW = Math.round(rightEdge - m.pos);
+      finalW = Math.round(anchorRight - m.pos);
       lines.push({ axis: 'x', pos: m.pos, kind: m.kind });
     }
   }
 
   if (dir.includes('s')) {
     const m = findEdgeMatch(finalY + finalH, yTargets);
-    if (m && m.pos - finalY >= minH) {
+    if (m && m.pos <= canvasHeight && m.pos - finalY >= minH) {
       finalH = Math.round(m.pos - finalY);
       lines.push({ axis: 'y', pos: m.pos, kind: m.kind });
     }
   } else if (dir.includes('n')) {
-    const bottomEdge = origY + origH;
     const m = findEdgeMatch(finalY, yTargets);
-    if (m && bottomEdge - m.pos >= minH) {
+    if (m && m.pos >= 0 && anchorBottom - m.pos >= minH) {
       finalY = Math.round(m.pos);
-      finalH = Math.round(bottomEdge - m.pos);
+      finalH = Math.round(anchorBottom - m.pos);
       lines.push({ axis: 'y', pos: m.pos, kind: m.kind });
     }
   }

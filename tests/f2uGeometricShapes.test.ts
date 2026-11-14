@@ -17,8 +17,12 @@ test('All geometric polygon shapes are marked F2U-safe in core shape helpers and
     assert.equal(isF2UGeometricShape(shp), true);
     assert.equal(isF2USafeShape(shp), true);
   }
-  assert.equal(isF2USafeShape('star'), false);
-  assert.equal(isF2USafeShape('heart'), false);
+  assert.equal(isF2USafeShape('star'), true);
+  assert.equal(isF2USafeShape('heart'), true);
+  assert.equal(isF2USafeShape('shield'), true);
+  assert.equal(isF2USafeShape('ticket'), true);
+  assert.equal(isF2USafeShape('cross_star'), true);
+  assert.equal(isF2USafeShape('scallop'), true);
 
   const shapeGroup = PURE_PRIMITIVE_GROUPS.find((g) => g.id === 'pure_shapes');
   assert.ok(shapeGroup);
@@ -26,7 +30,7 @@ test('All geometric polygon shapes are marked F2U-safe in core shape helpers and
   assert.equal(byType.get('pure_hexagon')?.f2uSafe, true);
   assert.equal(byType.get('pure_octagon')?.f2uSafe, true);
   assert.equal(byType.get('pure_diamond')?.f2uSafe, true);
-  assert.equal(byType.get('pure_star')?.f2uSafe, false);
+  assert.equal(byType.get('pure_star')?.f2uSafe, true);
 });
 
 test('Quadrant CSS generator builds HTMLPurifier-safe inline gradients without calc() or clip-path', () => {

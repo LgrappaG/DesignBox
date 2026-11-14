@@ -86,7 +86,7 @@ export const PURE_PRIMITIVE_GROUPS: PurePrimitiveGroup[] = [
       { type: 'pure_hexagon', label: 'Hexagon', desc: 'F2U geometric hexagon card or frame', icon: 'hexagon', f2uSafe: true },
       { type: 'pure_octagon', label: 'Octagon', desc: 'F2U bevel/octagon container frame', icon: 'octagon', f2uSafe: true },
       { type: 'pure_diamond', label: 'Diamond', desc: 'F2U geometric diamond frame', icon: 'diamond', f2uSafe: true },
-      { type: 'pure_star', label: 'Star Cutout', desc: '5-point star shape (FA star on F2U, clip-path on Pro)', icon: 'star', f2uSafe: false },
+      { type: 'pure_star', label: 'Star Cutout', desc: '5-point star shape (FA star vector on F2U, clip-path on Pro)', icon: 'star', f2uSafe: true },
       { type: 'pure_banner', label: 'Banner Strip', desc: 'Full-width header banner strip', icon: 'banner', f2uSafe: true },
       { type: 'pure_image_slot', label: 'Image Slot', desc: 'Customizable avatar or art frame', icon: 'image', f2uSafe: true },
       { type: 'pure_overlay_box', label: 'Float Overlay Box', desc: 'Floating overlay box layer', icon: 'layers', f2uSafe: true },

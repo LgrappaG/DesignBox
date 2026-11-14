@@ -44,7 +44,7 @@ test('F2U Shield detects Pro settings and masks without mutating user element', 
   assert.equal(masked.glassBlur, 0);
   assert.equal(masked.rotation, 0);
   assert.equal(masked.imgRotation, 0);
-  assert.equal(masked.boxClipShape, 'rect');
+  assert.equal(masked.boxClipShape, 'ticket');
   assert.equal(masked.hoverEffect, 'none');
   assert.equal(masked.idleAnimation, 'none');
   assert.equal(masked.googleFont, undefined);
@@ -70,8 +70,12 @@ test('F2U Shield keeps F2U-safe shapes, 90-degree rotations, and native FA anima
   assert.equal(isF2USafeShape('diamond'), true);
   assert.equal(isF2USafeShape('octagon'), true);
   assert.equal(isF2USafeShape('bevel'), true);
-  assert.equal(isF2USafeShape('ticket'), false);
-  assert.equal(isF2USafeShape('cross_star'), false);
+  assert.equal(isF2USafeShape('ticket'), true);
+  assert.equal(isF2USafeShape('cross_star'), true);
+  assert.equal(isF2USafeShape('scallop'), true);
+  assert.equal(isF2USafeShape('star'), true);
+  assert.equal(isF2USafeShape('heart'), true);
+  assert.equal(isF2USafeShape('shield'), true);
 
   const safeBox: DesignElement = {
     ...buildDefaultElement('box', [], 'paper', null),

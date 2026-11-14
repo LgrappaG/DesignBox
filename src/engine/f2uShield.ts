@@ -28,21 +28,155 @@ export function isToyhouseFreePlatform(platform: TargetPlatform): boolean {
   return platform === 'toyhouse_free' || platform === 'toyhouse_oc';
 }
 
+const F2U_SAFE_SHAPES = new Set<ImageShape>([
+  'rect',
+  'circle',
+  'pill',
+  'arch',
+  'leaf',
+  'polaroid',
+  'diamond',
+  'hexagon',
+  'hexagon_flat',
+  'octagon',
+  'bevel',
+  'ticket',
+  'shield',
+  'cross_star',
+  'scallop',
+  'star',
+  'heart',
+]);
+
 export function isF2USafeShape(shape?: ImageShape): boolean {
-  return (
-    !shape ||
-    shape === 'rect' ||
-    shape === 'circle' ||
-    shape === 'pill' ||
-    shape === 'arch' ||
-    shape === 'leaf' ||
-    shape === 'polaroid' ||
-    isF2UGeometricShape(shape)
-  );
+  return !shape || F2U_SAFE_SHAPES.has(shape) || isF2UGeometricShape(shape);
 }
 
 export function stripStyleTagsFromHtml(raw: string): string {
   return raw.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '').trim();
+}
+
+const SAFE_BODY_TAGS = new Set([
+  'b',
+  'i',
+  'u',
+  's',
+  'em',
+  'strong',
+  'small',
+  'mark',
+  'code',
+  'sub',
+  'sup',
+  'br',
+  'p',
+  'span',
+  'a',
+  'hr',
+  'ul',
+  'ol',
+  'li',
+  'div',
+]);
+
+const VOID_BODY_TAGS = new Set(['br', 'hr']);
+
+export function escapeHtmlAttr(val: string): string {
+  return val
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+export function isSafeUrlValue(raw: string): boolean {
+  if (/["'<>\r\n]/.test(raw)) {
+    return false;
+  }
+  const normalized = raw
+    .replace(/&#(\d+);?/g, (_, d: string) => String.fromCharCode(Number(d)))
+    .replace(/&#x([0-9a-f]+);?/gi, (_, h: string) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/[\s\u0000-\u001f]+/g, '')
+    .toLowerCase();
+  if (
+    normalized.startsWith('javascript:') ||
+    normalized.startsWith('vbscript:') ||
+    normalized.startsWith('data:text/html') ||
+    normalized.startsWith('data:image/svg+xml')
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function sanitizeHrefUrl(raw?: string, fallback = '#'): string {
+  const trimmed = (raw || '').trim();
+  if (!trimmed || !isSafeUrlValue(trimmed)) return fallback;
+  return escapeHtmlAttr(trimmed);
+}
+
+export function escapeCssUrl(raw?: string): string {
+  const trimmed = (raw || '').trim();
+  if (!trimmed || !isSafeUrlValue(trimmed)) return '';
+  if (/['"()\\<>\r\n]/.test(trimmed)) return '';
+  return escapeHtmlAttr(trimmed);
+}
+
+/**
+ * Sanitizes rich body HTML (`content`, `subContent`, tab/gallery captions) using a strict inline tag
+ * whitelist so safe formatting (`<b>`, `<i>`, `<a href>`, `<br>`, `<span style>`, etc.) is preserved
+ * while stripping `<script>`, `<style>`, `<iframe>`, `on*` handlers, and `javascript:`/`data:text/html` URLs.
+ */
+export function sanitizeF2UBodyHtml(raw: string): string {
+  if (!raw) return '';
+  // Remove dangerous blocks along with their contents
+  let stripped = raw.replace(
+    /<(script|style|iframe|object|embed|svg|math|form|textarea|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi,
+    ''
+  );
+  stripped = stripped.replace(
+    /<\/?(script|style|iframe|object|embed|svg|math|form|textarea|noscript)\b[^>]*\/?>/gi,
+    ''
+  );
+
+  // Filter individual HTML tags using a safe attribute whitelist
+  return stripped.replace(/<\/?([a-zA-Z][a-zA-Z0-9:-]*)(\s+[^<>]*)?\/?>/g, (full, rawTag: string, rawAttrs = '') => {
+    const tag = rawTag.toLowerCase();
+    if (!SAFE_BODY_TAGS.has(tag)) return '';
+    if (full.startsWith('</')) {
+      return VOID_BODY_TAGS.has(tag) ? '' : `</${tag}>`;
+    }
+
+    const cleanAttrs: string[] = [];
+    const attrRegex = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+    let m: RegExpExecArray | null;
+    while ((m = attrRegex.exec(rawAttrs)) !== null) {
+      const name = m[1].toLowerCase();
+      const val = m[2] ?? m[3] ?? m[4] ?? '';
+      if (name.startsWith('on')) continue;
+
+      if (name === 'href' && tag === 'a') {
+        if (!isSafeUrlValue(val)) continue;
+        cleanAttrs.push(`href="${escapeHtmlAttr(val.trim())}"`);
+      } else if (name === 'target' && tag === 'a') {
+        const safeTarget = val === '_blank' ? '_blank' : '_self';
+        cleanAttrs.push(`target="${safeTarget}"`);
+      } else if (name === 'rel' && tag === 'a') {
+        cleanAttrs.push(`rel="${escapeHtmlAttr(val)}"`);
+      } else if (name === 'class' || name === 'title') {
+        cleanAttrs.push(`${name}="${escapeHtmlAttr(val)}"`);
+      } else if (name === 'style') {
+        if (/expression\s*\(|javascript:|vbscript:|behavior\s*:/i.test(val)) continue;
+        const { cleanCss } = sanitizeInlineCssForF2U(val);
+        if (cleanCss) cleanAttrs.push(`style="${escapeHtmlAttr(cleanCss)}"`);
+      }
+    }
+
+    const attrStr = cleanAttrs.length > 0 ? ` ${cleanAttrs.join(' ')}` : '';
+    if (VOID_BODY_TAGS.has(tag)) return `<${tag}${attrStr} />`;
+    return `<${tag}${attrStr}>`;
+  });
 }
 
 export function sanitizeInlineCssForF2U(rawCss?: string): {
@@ -118,15 +252,6 @@ export function getElementF2UShieldReport(el: DesignElement): F2UShieldReport {
       label: `Image Tilt (${el.imgRotation}° → 0°)`,
       detail: 'Non-90° image transform rotation is stripped on F2U',
       category: 'transform',
-    });
-  }
-
-  if (el.type === 'pure_star') {
-    items.push({
-      key: 'pureShapeClip',
-      label: 'Polygon Shape (Star)',
-      detail: 'CSS clip-path polygon is stripped on F2U; falls back to box radius',
-      category: 'clip',
     });
   }
 

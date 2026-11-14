@@ -4,6 +4,7 @@ import {
   Check,
   Code2,
   Copy,
+  Download,
   Eye,
   Info,
   X,
@@ -30,6 +31,7 @@ interface BottomDockProps {
   warnings: ExportWarning[];
   copied: boolean;
   onCopyCode: () => void;
+  onExportHtml: () => void;
   previewSrcDoc: string;
   previewSurface: PreviewSurface;
   onPreviewSurfaceChange: (s: PreviewSurface) => void;
@@ -51,6 +53,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
   warnings,
   copied,
   onCopyCode,
+  onExportHtml,
   previewSrcDoc,
   previewSurface,
   onPreviewSurfaceChange,
@@ -163,6 +166,20 @@ export const BottomDock: React.FC<BottomDockProps> = ({
               >
                 {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                 <span>{copied ? 'Copied!' : 'Copy HTML'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={onExportHtml}
+                style={{
+                  backgroundColor: 'var(--bg-panel)',
+                  borderColor: 'var(--border-main)',
+                  color: 'var(--text-main)',
+                }}
+                className="flex items-center gap-1 px-2.5 py-0.5 border rounded-[4px] font-semibold hover:opacity-90"
+                title="Save exported .html file"
+              >
+                <Download className="w-3 h-3" />
+                <span>Save .HTML</span>
               </button>
             </div>
           ) : (
