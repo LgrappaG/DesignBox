@@ -1,22 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
-  Check,
   Code2,
   CopyPlus,
   Eye,
   EyeOff,
+  FileText,
   Info,
+  LayoutGrid,
   Lock,
+  MousePointerClick,
   Palette,
   PanelRightClose,
   PanelRightOpen,
   ShieldAlert,
   ShieldCheck,
-  Sliders,
   Sparkles,
+  Terminal,
   Trash2,
+  Type,
   Unlock,
+  Wrench,
 } from 'lucide-react';
 import { getElementF2UShieldReport } from '../engine/f2uShield';
 import { PanelResizeDragState } from '../hooks/useCanvasPointer';
@@ -28,15 +32,17 @@ import {
   TargetPlatform,
 } from '../types/schema';
 import {
+  getInspectorSectionSummaries,
+  isTypographyRelevantForElement,
+} from '../utils/inspectorHelpers';
+import {
   isTauriRuntime,
   NativeValidationReport,
   validatePlatformSnippetNative,
 } from '../utils/tauriDesktop';
 import {
-  BoxModelInspectorSection,
   F2UBootstrapAndFaSection,
   F2UInteractionAndAtomsSection,
-  OverflowAndConstraintsSection,
   RawHtmlCssOverrideSection,
 } from './PureInspectorSections';
 import {
@@ -45,7 +51,12 @@ import {
 } from './inspector/BatchAndCanvasInspector';
 import { ContentAndWidgetsSection } from './inspector/ContentAndWidgetsSection';
 import { EffectsAndMotionSection } from './inspector/EffectsAndMotionSection';
-import { LayoutGeometrySection } from './inspector/LayoutGeometrySection';
+import { InspectorCollapsibleSection } from './inspector/InspectorCollapsibleSection';
+import { InteractionsAndMotionSection } from './inspector/InteractionsAndMotionSection';
+import {
+  LayoutGeometrySection,
+  QuickAlignToolbar,
+} from './inspector/LayoutGeometrySection';
 import { StyleSurfaceAndColorsSection } from './inspector/StyleSurfaceAndColorsSection';
 import { TypographySection } from './inspector/TypographySection';
 
@@ -123,7 +134,7 @@ const COMPACT_TABS: Array<{
   icon: React.ComponentType<{ className?: string }>;
 }> = [
   { id: 'style', label: 'Design', title: 'Content, Colors, Typography, Geometry & Effects', icon: Palette },
-  { id: 'f2u_code', label: 'Code & Pro', title: 'Bootstrap/FA Helpers, Sanitizer & HTML Export', icon: Code2 },
+  { id: 'f2u_code', label: 'Code & Export', title: 'Bootstrap/FA Helpers, Sanitizer & HTML Export', icon: Code2 },
 ];
 
 /** 2-Tab Compact Right Inspector (`Design | Code & Pro`), plus Canvas Setup & Multi-Select Batch controls. */
@@ -188,6 +199,44 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
 }) => {
   const isToyhouseFree = platform === 'toyhouse_free' || platform === 'toyhouse_oc';
   const [showProEffectsInF2U, setShowProEffectsInF2U] = useState(false);
+  const [openSections, setOpenSections] = useState<
+    Record<
+      | 'content'
+      | 'layout'
+      | 'appearance'
+      | 'typography'
+      | 'effects'
+      | 'interactions'
+      | 'bs_fa'
+      | 'f2u_atoms'
+      | 'raw_override',
+      boolean
+    >
+  >({
+    content: true,
+    layout: true,
+    appearance: false,
+    typography: false,
+    effects: false,
+    interactions: false,
+    bs_fa: false,
+    f2u_atoms: false,
+    raw_override: false,
+  });
+  const toggleSection = (
+    id:
+      | 'content'
+      | 'layout'
+      | 'appearance'
+      | 'typography'
+      | 'effects'
+      | 'interactions'
+      | 'bs_fa'
+      | 'f2u_atoms'
+      | 'raw_override'
+  ) => {
+    setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
   const activeTab: InspectorTab = inspectorTab === 'f2u_code' ? 'f2u_code' : 'style';
   const multiSelectedElements =
     selectedIds.length > 1
@@ -195,6 +244,9 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
       : [];
   const selectedShieldReport =
     selectedElement && isToyhouseFree ? getElementF2UShieldReport(selectedElement) : null;
+  const sectionSummaries = selectedElement
+    ? getInspectorSectionSummaries(selectedElement, nestedChildren.length)
+    : null;
   const [nativeValidation, setNativeValidation] = useState<NativeValidationReport | null>(null);
 
   useEffect(() => {
@@ -411,6 +463,12 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
               </div>
             </div>
 
+            <QuickAlignToolbar
+              pinnedOverlay={Boolean(selectedElement.pinnedOverlay)}
+              onTogglePinnedOverlay={(next) => onUpdateSelected({ pinnedOverlay: next })}
+              onAlignSelectedOnCanvas={onAlignSelectedOnCanvas}
+            />
+
             {selectedShieldReport?.isShielded && (
               <div className="p-2 rounded-[6px] bg-amber-500/10 border border-amber-500/35 space-y-1 text-[10.5px] text-amber-700 dark:text-amber-300">
                 <div className="flex items-center justify-between gap-2 font-semibold">
@@ -486,80 +544,100 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
               onDeleteSelected={onDeleteSelected}
               onClearSelection={onClearSelection}
             />
-          ) : selectedElement ? (
-            <div className="flex-1 overflow-y-auto p-3.5 space-y-3.5 text-xs">
-              <ContentAndWidgetsSection
-                el={selectedElement}
-                updateSelected={onUpdateSelected}
-                isToyhouseFree={isToyhouseFree}
-                swatches={swatches}
-                uploadingImage={uploadingImage}
-                imageUploadTarget={imageUploadTarget}
-                uploadNotice={uploadNotice}
-                onTriggerImageUpload={onTriggerImageUpload}
-              />
-              <StyleSurfaceAndColorsSection
-                el={selectedElement}
-                updateSelected={onUpdateSelected}
-                isToyhouseFree={isToyhouseFree}
-                swatches={swatches}
-                swatchTarget={swatchTarget}
-                setSwatchTarget={onSetSwatchTarget}
-                onAddSelectedColorToSwatches={onAddSelectedColorToSwatches}
-                onApplySwatchColor={onApplySwatchColor}
-                onRemoveSwatch={onRemoveSwatch}
-              />
-              <TypographySection
-                el={selectedElement}
-                updateSelected={onUpdateSelected}
-              />
-              <LayoutGeometrySection
-                el={selectedElement}
-                allElements={elements}
-                containerCandidates={containerCandidates}
-                nestedChildren={nestedChildren}
-                layoutMode={layoutMode}
-                editingContainerId={editingContainerId}
-                isToyhouseFree={isToyhouseFree}
-                updateSelected={onUpdateSelected}
-                onAlignSelectedOnCanvas={onAlignSelectedOnCanvas}
-                onSelectElementById={onSelectElementById}
-                onNestIntoContainer={onNestIntoContainer}
-                onPopOutFromContainer={onPopOutFromContainer}
-                onReorderNestedChild={onReorderNestedChild}
-                onEnterContainerIsolation={onEnterContainerIsolation}
-                onExitContainerIsolation={onExitContainerIsolation}
-              />
-
-              <details
-                style={{
-                  backgroundColor: 'var(--bg-panel-alt)',
-                  borderColor: 'var(--border-main)',
-                }}
-                className="rounded-[8px] border overflow-hidden"
+          ) : selectedElement && sectionSummaries ? (
+            <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5 text-xs">
+              <InspectorCollapsibleSection
+                id="content"
+                title="Content & Widget"
+                icon={FileText}
+                summary={sectionSummaries.content}
+                isOpen={openSections.content}
+                onToggle={() => toggleSection('content')}
               >
-                <summary className="px-2.5 py-2 font-semibold text-[11px] cursor-pointer select-none flex items-center justify-between hover:bg-black/5">
-                  <span>Box Model (Margin / Padding) &amp; Overflow</span>
-                  <span style={{ color: 'var(--text-muted)' }} className="text-[9.5px] font-mono">
-                    {selectedElement.overflowY || selectedElement.overflowX || 'visible'}
-                  </span>
-                </summary>
-                <div className="p-2.5 pt-1 space-y-3 border-t border-[var(--border-main)]">
-                  <BoxModelInspectorSection
-                    el={selectedElement}
-                    updateSelected={onUpdateSelected}
-                    isToyhouseFree={isToyhouseFree}
-                    swatches={swatches}
-                  />
-                  <OverflowAndConstraintsSection
-                    el={selectedElement}
-                    updateSelected={onUpdateSelected}
-                    isToyhouseFree={isToyhouseFree}
-                  />
-                </div>
-              </details>
+                <ContentAndWidgetsSection
+                  el={selectedElement}
+                  updateSelected={onUpdateSelected}
+                  isToyhouseFree={isToyhouseFree}
+                  swatches={swatches}
+                  uploadingImage={uploadingImage}
+                  imageUploadTarget={imageUploadTarget}
+                  uploadNotice={uploadNotice}
+                  onTriggerImageUpload={onTriggerImageUpload}
+                />
+              </InspectorCollapsibleSection>
 
-              {isToyhouseFree && (
+              <InspectorCollapsibleSection
+                id="layout"
+                title="Position, Size & Layout"
+                icon={LayoutGrid}
+                summary={sectionSummaries.layout}
+                isOpen={openSections.layout}
+                onToggle={() => toggleSection('layout')}
+              >
+                <LayoutGeometrySection
+                  el={selectedElement}
+                  allElements={elements}
+                  containerCandidates={containerCandidates}
+                  nestedChildren={nestedChildren}
+                  layoutMode={layoutMode}
+                  editingContainerId={editingContainerId}
+                  isToyhouseFree={isToyhouseFree}
+                  updateSelected={onUpdateSelected}
+                  onSelectElementById={onSelectElementById}
+                  onNestIntoContainer={onNestIntoContainer}
+                  onPopOutFromContainer={onPopOutFromContainer}
+                  onReorderNestedChild={onReorderNestedChild}
+                  onEnterContainerIsolation={onEnterContainerIsolation}
+                  onExitContainerIsolation={onExitContainerIsolation}
+                />
+              </InspectorCollapsibleSection>
+
+              <InspectorCollapsibleSection
+                id="appearance"
+                title="Colors, Surface & Border"
+                icon={Palette}
+                summary={
+                  <span className="inline-flex items-center gap-1.5">
+                    <span
+                      className="w-2.5 h-2.5 rounded-[3px] border border-black/20 shrink-0"
+                      style={{ backgroundColor: selectedElement.bgColor || 'transparent' }}
+                    />
+                    <span className="truncate">{sectionSummaries.appearance}</span>
+                  </span>
+                }
+                isOpen={openSections.appearance}
+                onToggle={() => toggleSection('appearance')}
+              >
+                <StyleSurfaceAndColorsSection
+                  el={selectedElement}
+                  updateSelected={onUpdateSelected}
+                  isToyhouseFree={isToyhouseFree}
+                  swatches={swatches}
+                  swatchTarget={swatchTarget}
+                  setSwatchTarget={onSetSwatchTarget}
+                  onAddSelectedColorToSwatches={onAddSelectedColorToSwatches}
+                  onApplySwatchColor={onApplySwatchColor}
+                  onRemoveSwatch={onRemoveSwatch}
+                />
+              </InspectorCollapsibleSection>
+
+              {isTypographyRelevantForElement(selectedElement) && (
+                <InspectorCollapsibleSection
+                  id="typography"
+                  title="Typography"
+                  icon={Type}
+                  summary={sectionSummaries.typography}
+                  isOpen={openSections.typography}
+                  onToggle={() => toggleSection('typography')}
+                >
+                  <TypographySection
+                    el={selectedElement}
+                    updateSelected={onUpdateSelected}
+                  />
+                </InspectorCollapsibleSection>
+              )}
+
+              {isToyhouseFree && (openSections.effects || openSections.interactions) && (
                 <div
                   style={{
                     backgroundColor: 'var(--bg-input)',
@@ -583,13 +661,40 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                 </div>
               )}
 
-              <EffectsAndMotionSection
-                el={selectedElement}
-                updateSelected={onUpdateSelected}
-                isToyhouseFree={isToyhouseFree}
-                swatches={swatches}
-                showProControls={!isToyhouseFree || showProEffectsInF2U}
-              />
+              <InspectorCollapsibleSection
+                id="effects"
+                title="Effects, Shadow & Modifiers"
+                icon={Sparkles}
+                summary={sectionSummaries.effects}
+                isOpen={openSections.effects}
+                onToggle={() => toggleSection('effects')}
+              >
+                <EffectsAndMotionSection
+                  el={selectedElement}
+                  updateSelected={onUpdateSelected}
+                  isToyhouseFree={isToyhouseFree}
+                  swatches={swatches}
+                  showProControls={!isToyhouseFree || showProEffectsInF2U}
+                />
+              </InspectorCollapsibleSection>
+
+              <InspectorCollapsibleSection
+                id="interactions"
+                title="Interactions, Link & Motion"
+                icon={MousePointerClick}
+                summary={sectionSummaries.interactions}
+                isOpen={openSections.interactions}
+                onToggle={() => toggleSection('interactions')}
+              >
+                <InteractionsAndMotionSection
+                  el={selectedElement}
+                  updateSelected={onUpdateSelected}
+                  isToyhouseFree={isToyhouseFree}
+                  showProControls={!isToyhouseFree || showProEffectsInF2U}
+                  uploadingImage={uploadingImage}
+                  onTriggerImageUpload={onTriggerImageUpload}
+                />
+              </InspectorCollapsibleSection>
             </div>
           ) : (
             <CanvasSettingsInspector
@@ -607,26 +712,61 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
             />
           )
         ) : (
-          /* F2U & Code Tab (Accessible with or without selected element) */
-          <div className="flex-1 flex flex-col overflow-y-auto p-3.5 space-y-3 text-xs">
-            {selectedElement && (
+          /* Code & Export Tab (Accessible with or without selected element) */
+          <div className="flex-1 flex flex-col overflow-y-auto p-3.5 space-y-2.5 text-xs">
+            {selectedElement && sectionSummaries && (
               <>
-                <F2UBootstrapAndFaSection
-                  el={selectedElement}
-                  updateSelected={onUpdateSelected}
-                  isToyhouseFree={isToyhouseFree}
-                />
-                <F2UInteractionAndAtomsSection
-                  el={selectedElement}
-                  updateSelected={onUpdateSelected}
-                  isToyhouseFree={isToyhouseFree}
-                  swatches={swatches}
-                />
-                <RawHtmlCssOverrideSection
-                  el={selectedElement}
-                  updateSelected={onUpdateSelected}
-                  isToyhouseFree={isToyhouseFree}
-                />
+                <InspectorCollapsibleSection
+                  id="bs_fa"
+                  title="Bootstrap 4 & Font Awesome"
+                  icon={Wrench}
+                  summary={sectionSummaries.bsFa}
+                  isOpen={openSections.bs_fa}
+                  onToggle={() => toggleSection('bs_fa')}
+                >
+                  <F2UBootstrapAndFaSection
+                    el={selectedElement}
+                    updateSelected={onUpdateSelected}
+                    isToyhouseFree={isToyhouseFree}
+                  />
+                </InspectorCollapsibleSection>
+
+                <InspectorCollapsibleSection
+                  id="f2u_atoms"
+                  title="F2U Collapse, Cursor & Atom Options"
+                  icon={Sparkles}
+                  summary={
+                    selectedElement.collapsible
+                      ? 'Collapse'
+                      : selectedElement.cursorStyle && selectedElement.cursorStyle !== 'auto'
+                        ? selectedElement.cursorStyle
+                        : 'Atoms'
+                  }
+                  isOpen={openSections.f2u_atoms}
+                  onToggle={() => toggleSection('f2u_atoms')}
+                >
+                  <F2UInteractionAndAtomsSection
+                    el={selectedElement}
+                    updateSelected={onUpdateSelected}
+                    isToyhouseFree={isToyhouseFree}
+                    swatches={swatches}
+                  />
+                </InspectorCollapsibleSection>
+
+                <InspectorCollapsibleSection
+                  id="raw_override"
+                  title="Raw HTML & Inline CSS Override"
+                  icon={Terminal}
+                  summary={sectionSummaries.rawOverride}
+                  isOpen={openSections.raw_override}
+                  onToggle={() => toggleSection('raw_override')}
+                >
+                  <RawHtmlCssOverrideSection
+                    el={selectedElement}
+                    updateSelected={onUpdateSelected}
+                    isToyhouseFree={isToyhouseFree}
+                  />
+                </InspectorCollapsibleSection>
               </>
             )}
 

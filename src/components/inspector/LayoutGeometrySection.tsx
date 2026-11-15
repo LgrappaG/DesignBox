@@ -3,8 +3,83 @@ import { Boxes, Layers, Link as LinkIcon, Unlink } from 'lucide-react';
 import { DesignElement, LayoutMode, SplitModifier } from '../../types/schema';
 import { isPureContainerType } from '../../data/purePrimitives';
 import { getFontAwesomeRotationClass } from '../../engine/layoutSolver';
+import { BoxModelInspectorSection, OverflowAndConstraintsSection } from '../PureInspectorSections';
+import { InspectorSubExpander } from './InspectorCollapsibleSection';
 
-type CanvasAlignAction = 'left' | 'center-x' | 'right' | 'top' | 'center-y' | 'bottom' | 'full-w';
+export type CanvasAlignAction =
+  | 'left'
+  | 'center-x'
+  | 'right'
+  | 'top'
+  | 'center-y'
+  | 'bottom'
+  | 'full-w';
+
+export interface QuickAlignToolbarProps {
+  pinnedOverlay: boolean;
+  onTogglePinnedOverlay: (next: boolean) => void;
+  onAlignSelectedOnCanvas: (align: CanvasAlignAction) => void;
+}
+
+const ALIGN_BUTTONS: ReadonlyArray<{ id: CanvasAlignAction; label: string; title: string }> = [
+  { id: 'left', label: '⇤L', title: 'Align Left' },
+  { id: 'center-x', label: '↔C', title: 'Center Horizontally' },
+  { id: 'right', label: 'R⇥', title: 'Align Right' },
+  { id: 'top', label: '⇡T', title: 'Align Top' },
+  { id: 'center-y', label: '↕M', title: 'Center Vertically' },
+  { id: 'bottom', label: 'B⇣', title: 'Align Bottom' },
+  { id: 'full-w', label: '100%', title: 'Expand to Full Canvas Width' },
+];
+
+/** Pinned Figma-style alignment toolbar rendered in the sticky element header. */
+export const QuickAlignToolbar: React.FC<QuickAlignToolbarProps> = ({
+  pinnedOverlay,
+  onTogglePinnedOverlay,
+  onAlignSelectedOnCanvas,
+}) => {
+  return (
+    <div className="flex items-center gap-1 pt-0.5">
+      <div className="flex-1 grid grid-cols-7 gap-1 text-[9.5px] font-mono min-w-0">
+        {ALIGN_BUTTONS.map((btn) => (
+          <button
+            key={btn.id}
+            type="button"
+            onClick={() => onAlignSelectedOnCanvas(btn.id)}
+            style={{
+              backgroundColor: 'var(--bg-input)',
+              borderColor: 'var(--border-strong)',
+            }}
+            className="py-1 px-0.5 rounded-[4px] border hover:border-[var(--accent)] text-center whitespace-nowrap transition"
+            title={btn.title}
+          >
+            {btn.label}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={() => onTogglePinnedOverlay(!pinnedOverlay)}
+        style={
+          pinnedOverlay
+            ? {
+                backgroundColor: 'var(--accent-soft)',
+                borderColor: 'var(--accent)',
+                color: 'var(--accent)',
+              }
+            : {
+                backgroundColor: 'var(--bg-input)',
+                borderColor: 'var(--border-strong)',
+                color: 'var(--text-muted)',
+              }
+        }
+        className="px-1.5 py-1 rounded-[4px] border text-[9.5px] font-mono font-semibold shrink-0 transition"
+        title="Float Overlay: layer independently above layout flow"
+      >
+        Float
+      </button>
+    </div>
+  );
+};
 
 interface LayoutGeometrySectionProps {
   el: DesignElement;
@@ -15,7 +90,6 @@ interface LayoutGeometrySectionProps {
   editingContainerId: string | null;
   isToyhouseFree: boolean;
   updateSelected: (patch: Partial<DesignElement>) => void;
-  onAlignSelectedOnCanvas: (align: CanvasAlignAction) => void;
   onSelectElementById: (id: string) => void;
   onNestIntoContainer: (childId: string, containerId: string | null) => void;
   onPopOutFromContainer: (childId: string) => void;
@@ -24,7 +98,7 @@ interface LayoutGeometrySectionProps {
   onExitContainerIsolation: () => void;
 }
 
-/** Position, sizing, quick align, 4-corner border radii, and parent/child nesting controls. */
+/** Position, sizing, auto-fit height, 4-corner border radii, box model, and container nesting controls. */
 export const LayoutGeometrySection: React.FC<LayoutGeometrySectionProps> = ({
   el,
   allElements,
@@ -34,7 +108,6 @@ export const LayoutGeometrySection: React.FC<LayoutGeometrySectionProps> = ({
   editingContainerId,
   isToyhouseFree,
   updateSelected,
-  onAlignSelectedOnCanvas,
   onSelectElementById,
   onNestIntoContainer,
   onPopOutFromContainer,
@@ -46,60 +119,27 @@ export const LayoutGeometrySection: React.FC<LayoutGeometrySectionProps> = ({
   const parentSplit = parentEl?.modifiers?.find(
     (m): m is SplitModifier => m.kind === 'split' && m.enabled
   );
+  const canNestIntoParent =
+    el.type !== 'box' &&
+    el.type !== 'folder_header' &&
+    (containerCandidates.length > 0 || Boolean(el.parentId));
+  const isContainerBlock = isPureContainerType(el.type) || nestedChildren.length > 0;
+  const hasBoxModelOverrides = Boolean(
+    el.padding ||
+      el.marginT ||
+      el.marginR ||
+      el.marginB ||
+      el.marginL ||
+      (el.overflowY && el.overflowY !== 'hidden') ||
+      (el.overflowX && el.overflowX !== 'hidden') ||
+      el.maxHeightPx ||
+      el.aspectRatio
+  );
 
   return (
-    <div className="space-y-3">
-      {/* Position, Size & Quick Align */}
-      <div
-        style={{
-          backgroundColor: 'var(--bg-panel-alt)',
-          borderColor: 'var(--border-main)',
-        }}
-        className="p-2.5 rounded-[8px] border space-y-2.5"
-      >
-        <div className="flex items-center justify-between">
-          <span className="font-semibold text-[11px] flex items-center gap-1">
-            <Layers className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-            <span>Position, Size &amp; Quick Align</span>
-          </span>
-          <label className="flex items-center gap-1 text-[10px] cursor-pointer">
-            <input
-              type="checkbox"
-              checked={Boolean(el.pinnedOverlay)}
-              onChange={(e) => updateSelected({ pinnedOverlay: e.target.checked })}
-            />
-            <span>Float Overlay</span>
-          </label>
-        </div>
-
-        <div className="flex flex-wrap gap-1 text-[10px] font-mono">
-          {(
-            [
-              { id: 'left', label: '⇤ L', title: 'Align Left' },
-              { id: 'center-x', label: '↔ C', title: 'Center Horizontally' },
-              { id: 'right', label: 'R ⇥', title: 'Align Right' },
-              { id: 'top', label: '⇡ T', title: 'Align Top' },
-              { id: 'center-y', label: '↕ M', title: 'Center Vertically' },
-              { id: 'bottom', label: 'B ⇣', title: 'Align Bottom' },
-              { id: 'full-w', label: '100%', title: 'Expand to Full Canvas Width' },
-            ] as const
-          ).map((btn) => (
-            <button
-              key={btn.id}
-              type="button"
-              onClick={() => onAlignSelectedOnCanvas(btn.id)}
-              style={{
-                backgroundColor: 'var(--bg-input)',
-                borderColor: 'var(--border-strong)',
-              }}
-              className="flex-1 min-w-[32px] py-1 px-1 rounded-[5px] border hover:opacity-80 text-center whitespace-nowrap"
-              title={btn.title}
-            >
-              {btn.label}
-            </button>
-          ))}
-        </div>
-
+    <div className="space-y-2.5">
+      {/* Position, Size & Auto-Fit Height */}
+      <div className="space-y-2">
         <div className="grid grid-cols-5 gap-1.5 font-mono text-[10px]">
           <label>
             <span style={{ color: 'var(--text-muted)' }} className="block mb-0.5">X</span>
@@ -171,6 +211,18 @@ export const LayoutGeometrySection: React.FC<LayoutGeometrySectionProps> = ({
             />
           </label>
         </div>
+
+        <label className="flex items-center gap-2 cursor-pointer text-[10px] pt-0.5">
+          <input
+            type="checkbox"
+            checked={Boolean(el.autoHeight)}
+            onChange={(e) => updateSelected({ autoHeight: e.target.checked })}
+            className="rounded text-accent focus:ring-accent"
+          />
+          <span className="select-none" style={{ color: 'var(--text-muted)' }}>
+            Auto-Fit Content Height (Dynamic height based on content)
+          </span>
+        </label>
 
         <div className="space-y-2">
           <div>
@@ -328,286 +380,306 @@ export const LayoutGeometrySection: React.FC<LayoutGeometrySectionProps> = ({
         </div>
       </div>
 
-      {/* Nest Inside Selector */}
-      {el.type !== 'box' && el.type !== 'folder_header' && (containerCandidates.length > 0 || el.parentId) && (
-        <div
-          style={{
-            backgroundColor: 'var(--bg-panel-alt)',
-            borderColor: 'var(--border-main)',
-          }}
-          className="p-2.5 rounded-[8px] border space-y-2"
+      {/* Box Model: Padding, Margin & Overflow */}
+      <InspectorSubExpander
+        title="Padding, Margin & Overflow (Box Model)"
+        isActive={hasBoxModelOverrides}
+        summary={`Pad ${el.padding ?? 0}px · ${el.overflowY || (el.scrollable ? 'auto' : 'hidden')}`}
+      >
+        <BoxModelInspectorSection
+          el={el}
+          updateSelected={updateSelected}
+          isToyhouseFree={isToyhouseFree}
+        />
+        <OverflowAndConstraintsSection
+          el={el}
+          updateSelected={updateSelected}
+          isToyhouseFree={isToyhouseFree}
+        />
+      </InspectorSubExpander>
+
+      {/* Container Nesting & Flow */}
+      {(canNestIntoParent || isContainerBlock) && (
+        <InspectorSubExpander
+          title="Container Nesting & Flow"
+          defaultOpen={Boolean(el.parentId) || nestedChildren.length > 0}
+          isActive={Boolean(el.parentId) || nestedChildren.length > 0}
+          summary={
+            nestedChildren.length > 0
+              ? `${nestedChildren.length} Children`
+              : el.parentId
+                ? 'Nested'
+                : 'Root'
+          }
         >
-          {containerCandidates.length > 0 && (
-            <label className="block">
-              <span style={{ color: 'var(--text-muted)' }} className="block text-[10px] mb-1 font-semibold">
-                Nest Inside Container Box:
-              </span>
-              <select
-                value={el.parentId || ''}
-                onChange={(e) => onNestIntoContainer(el.id, e.target.value ? e.target.value : null)}
-                style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                className="w-full border rounded-[5px] px-2 py-1 text-[11px]"
-              >
-                <option value="">None (Root Canvas Layer)</option>
-                {containerCandidates.map((box) => (
-                  <option key={box.id} value={box.id}>
-                    ↳ {box.label} ({box.id})
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-
-          {el.parentId && (
-            <div className="p-2 rounded-[6px] bg-black/5 dark:bg-white/5 border border-[var(--border-main)] space-y-2 text-[10px]">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-accent flex items-center gap-1">
-                  <Layers className="w-3 h-3" />
-                  <span>Nested Child Properties</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onPopOutFromContainer(el.id)}
-                  className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-red-500/15 text-red-500 hover:bg-red-500/25 transition font-semibold"
-                >
-                  Pop Out to Canvas
-                </button>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => onSelectElementById(el.parentId!)}
-                style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                className="w-full py-1 px-2 border rounded-[4px] text-[10px] font-medium text-left truncate hover:opacity-85 flex items-center justify-between"
-              >
-                <span>Container: {parentEl?.label || el.parentId}</span>
-                <span className="text-accent font-bold">Inspect Box ➔</span>
-              </button>
-
-              <div className="grid grid-cols-2 gap-1.5">
-                <label>
-                  <span style={{ color: 'var(--text-muted)' }} className="block mb-0.5">Width in Flow:</span>
+          {canNestIntoParent && (
+            <div className="space-y-2">
+              {containerCandidates.length > 0 && (
+                <label className="block">
+                  <span style={{ color: 'var(--text-muted)' }} className="block text-[10px] mb-1 font-semibold">
+                    Nest Inside Container Box:
+                  </span>
                   <select
-                    value={el.childWidthMode || 'auto'}
-                    onChange={(e) =>
-                      updateSelected({ childWidthMode: e.target.value as DesignElement['childWidthMode'] })
-                    }
+                    value={el.parentId || ''}
+                    onChange={(e) => onNestIntoContainer(el.id, e.target.value ? e.target.value : null)}
                     style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                    className="w-full border rounded-[4px] px-1 py-0.5 text-[10px]"
+                    className="w-full border rounded-[5px] px-2 py-1 text-[11px]"
                   >
-                    <option value="auto">Auto Fit (Natural)</option>
-                    <option value="full">100% Full Width</option>
-                    <option value="half">50% Half Width</option>
-                    <option value="custom">Custom Fixed PX</option>
+                    <option value="">None (Root Canvas Layer)</option>
+                    {containerCandidates.map((box) => (
+                      <option key={box.id} value={box.id}>
+                        ↳ {box.label} ({box.id})
+                      </option>
+                    ))}
                   </select>
                 </label>
-                {el.childWidthMode === 'custom' && (
-                  <label>
-                    <span style={{ color: 'var(--text-muted)' }} className="block mb-0.5">Width (PX)</span>
-                    <input
-                      type="number"
-                      min={30}
-                      max={1200}
-                      value={el.childCustomWidth || el.width}
-                      onChange={(e) =>
-                        updateSelected({ childCustomWidth: parseInt(e.target.value, 10) || el.width })
-                      }
-                      style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                      className="w-full border rounded-[4px] px-1 py-0.5 text-[10px]"
-                    />
-                  </label>
-                )}
-              </div>
+              )}
 
-              {parentSplit && (
-                <div className="pt-1">
-                  <span style={{ color: 'var(--text-muted)' }} className="block mb-1 text-[9.5px]">
-                    Target Split Pane:
-                  </span>
-                  <div className="grid grid-cols-3 gap-1">
-                    {(parentSplit.panes === 3 ? [0, 1, 2] : [0, 1]).map((pIdx) => (
-                      <button
-                        key={pIdx}
-                        type="button"
-                        onClick={() => updateSelected({ parentPaneIndex: pIdx })}
-                        style={
-                          (el.parentPaneIndex ?? 0) === pIdx
-                            ? { backgroundColor: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' }
-                            : { backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }
-                        }
-                        className="border rounded-[4px] py-0.5 text-[9.5px] font-mono font-semibold"
-                      >
-                        Pane {pIdx + 1}
-                      </button>
-                    ))}
+              {el.parentId && (
+                <div className="p-2 rounded-[6px] bg-black/5 dark:bg-white/5 border border-[var(--border-main)] space-y-2 text-[10px]">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-accent flex items-center gap-1">
+                      <Layers className="w-3 h-3" />
+                      <span>Nested Child Properties</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onPopOutFromContainer(el.id)}
+                      className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-red-500/15 text-red-500 hover:bg-red-500/25 transition font-semibold"
+                    >
+                      Pop Out to Canvas
+                    </button>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => onSelectElementById(el.parentId!)}
+                    style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+                    className="w-full py-1 px-2 border rounded-[4px] text-[10px] font-medium text-left truncate hover:opacity-85 flex items-center justify-between"
+                  >
+                    <span>Container: {parentEl?.label || el.parentId}</span>
+                    <span className="text-accent font-bold">Inspect Box ➔</span>
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <label>
+                      <span style={{ color: 'var(--text-muted)' }} className="block mb-0.5">Width in Flow:</span>
+                      <select
+                        value={el.childWidthMode || 'auto'}
+                        onChange={(e) =>
+                          updateSelected({ childWidthMode: e.target.value as DesignElement['childWidthMode'] })
+                        }
+                        style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+                        className="w-full border rounded-[4px] px-1 py-0.5 text-[10px]"
+                      >
+                        <option value="auto">Auto Fit (Natural)</option>
+                        <option value="full">100% Full Width</option>
+                        <option value="half">50% Half Width</option>
+                        <option value="custom">Custom Fixed PX</option>
+                      </select>
+                    </label>
+                    {el.childWidthMode === 'custom' && (
+                      <label>
+                        <span style={{ color: 'var(--text-muted)' }} className="block mb-0.5">Width (PX)</span>
+                        <input
+                          type="number"
+                          min={30}
+                          max={1200}
+                          value={el.childCustomWidth || el.width}
+                          onChange={(e) =>
+                            updateSelected({ childCustomWidth: parseInt(e.target.value, 10) || el.width })
+                          }
+                          style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+                          className="w-full border rounded-[4px] px-1 py-0.5 text-[10px]"
+                        />
+                      </label>
+                    )}
+                  </div>
+
+                  {parentSplit && (
+                    <div className="pt-1">
+                      <span style={{ color: 'var(--text-muted)' }} className="block mb-1 text-[9.5px]">
+                        Target Split Pane:
+                      </span>
+                      <div className="grid grid-cols-3 gap-1">
+                        {(parentSplit.panes === 3 ? [0, 1, 2] : [0, 1]).map((pIdx) => (
+                          <button
+                            key={pIdx}
+                            type="button"
+                            onClick={() => updateSelected({ parentPaneIndex: pIdx })}
+                            style={
+                              (el.parentPaneIndex ?? 0) === pIdx
+                                ? { backgroundColor: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' }
+                                : { backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }
+                            }
+                            className="border rounded-[4px] py-0.5 text-[9.5px] font-mono font-semibold"
+                          >
+                            Pane {pIdx + 1}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )}
-        </div>
-      )}
 
-      {/* Parent Container Layout Manager */}
-      {(isPureContainerType(el.type) || nestedChildren.length > 0) && (
-        <div
-          style={{
-            backgroundColor: 'var(--bg-panel-alt)',
-            borderColor: 'var(--border-main)',
-          }}
-          className="p-2.5 rounded-[8px] border space-y-2.5"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-1 border-b border-[var(--border-main)] pb-1.5">
-            <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--accent)' }}>
-              <Boxes className="w-3.5 h-3.5" />
-              <span>Nested Container Layout</span>
-            </span>
-            <div className="flex items-center gap-1">
-              {layoutMode !== 'block' && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    editingContainerId === el.id
-                      ? onExitContainerIsolation()
-                      : onEnterContainerIsolation(el.id)
-                  }
-                  style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
-                  className="text-[9.5px] font-mono px-1.5 py-0.5 rounded font-semibold hover:opacity-90"
-                >
-                  {editingContainerId === el.id ? 'Exit Inside' : 'Edit Inside'}
-                </button>
-              )}
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 font-semibold">
-                {nestedChildren.length} {nestedChildren.length === 1 ? 'Item' : 'Items'}
-              </span>
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <span style={{ color: 'var(--text-muted)' }} className="block text-[10px] font-mono">
-              Inner Flow / Structure:
-            </span>
-            <div className="flex flex-wrap gap-1 text-[10px] font-mono">
-              {(
-                [
-                  { id: 'flex_col', label: 'Stack ⬇' },
-                  { id: 'flex_row', label: 'Row ➡' },
-                  { id: 'grid_2', label: '2-Col ⊞' },
-                  { id: 'grid_3', label: '3-Col ▦' },
-                  { id: 'freeform_offset', label: 'Free ⤹' },
-                ] as const
-              ).map((mode) => (
-                <button
-                  key={mode.id}
-                  type="button"
-                  onClick={() => updateSelected({ containerLayout: mode.id })}
-                  style={{
-                    backgroundColor:
-                      (el.containerLayout || 'flex_col') === mode.id
-                        ? 'var(--accent)'
-                        : 'var(--bg-input)',
-                    borderColor: 'var(--border-strong)',
-                    color: (el.containerLayout || 'flex_col') === mode.id ? '#fff' : 'inherit',
-                  }}
-                  className="flex-1 min-w-[66px] py-1 px-1.5 rounded-[5px] border text-center font-medium transition whitespace-nowrap"
-                >
-                  {mode.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 text-[10px]">
-            <label>
-              <span style={{ color: 'var(--text-muted)' }} className="block mb-1">
-                Inner Gap ({el.containerGap !== undefined ? el.containerGap : 8}px)
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={32}
-                value={el.containerGap !== undefined ? el.containerGap : 8}
-                onChange={(e) => updateSelected({ containerGap: parseInt(e.target.value, 10) })}
-                className="w-full accent-accent"
-              />
-            </label>
-            <label>
-              <span style={{ color: 'var(--text-muted)' }} className="block mb-1">Align Items</span>
-              <select
-                value={el.containerAlign || 'stretch'}
-                onChange={(e) =>
-                  updateSelected({ containerAlign: e.target.value as DesignElement['containerAlign'] })
-                }
-                style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                className="w-full border rounded-[5px] px-1.5 py-1 text-[10px]"
-              >
-                <option value="stretch">Stretch (Full width)</option>
-                <option value="start">Start (Left / Top)</option>
-                <option value="center">Center</option>
-                <option value="end">End (Right / Bottom)</option>
-              </select>
-            </label>
-          </div>
-
-          <div className="space-y-1.5 pt-1">
-            <span style={{ color: 'var(--text-muted)' }} className="block text-[10px] font-mono">
-              Contained Children ({nestedChildren.length}):
-            </span>
-            {nestedChildren.length === 0 ? (
-              <div className="p-2 border border-dashed rounded-[6px] text-center text-[10px] text-stone-400">
-                No items nested yet. Select other canvas elements and choose &quot;Nest Inside Container Box&quot;.
-              </div>
-            ) : (
-              <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
-                {nestedChildren.map((child, idx) => (
-                  <div
-                    key={child.id}
-                    style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}
-                    className="flex items-center justify-between p-1.5 rounded-[5px] border text-[11px]"
-                  >
-                    <div
-                      className="flex items-center gap-1.5 truncate flex-1 cursor-pointer"
-                      onClick={() => onSelectElementById(child.id)}
-                      title="Click to inspect this child"
+          {isContainerBlock && (
+            <div className={`space-y-2.5 ${canNestIntoParent ? 'pt-2 border-t border-[var(--border-main)]' : ''}`}>
+              <div className="flex flex-wrap items-center justify-between gap-1 border-b border-[var(--border-main)] pb-1.5">
+                <span className="font-bold text-[11px] flex items-center gap-1.5" style={{ color: 'var(--accent)' }}>
+                  <Boxes className="w-3.5 h-3.5" />
+                  <span>Nested Container Layout</span>
+                </span>
+                <div className="flex items-center gap-1">
+                  {layoutMode !== 'block' && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        editingContainerId === el.id
+                          ? onExitContainerIsolation()
+                          : onEnterContainerIsolation(el.id)
+                      }
+                      style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
+                      className="text-[9.5px] font-mono px-1.5 py-0.5 rounded font-semibold hover:opacity-90"
                     >
-                      <span className="font-mono text-[9px] opacity-60">#{idx + 1}</span>
-                      <span className="font-semibold truncate">{child.label}</span>
-                      <span className="text-[9px] opacity-50 font-mono font-normal">({child.type})</span>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0 ml-1">
-                      <button
-                        type="button"
-                        disabled={idx === 0}
-                        onClick={() => onReorderNestedChild(el.id, child.id, 'up')}
-                        className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 disabled:opacity-30 text-[10px]"
-                        title="Move Earlier in Flow"
-                      >
-                        ▲
-                      </button>
-                      <button
-                        type="button"
-                        disabled={idx === nestedChildren.length - 1}
-                        onClick={() => onReorderNestedChild(el.id, child.id, 'down')}
-                        className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 disabled:opacity-30 text-[10px]"
-                        title="Move Later in Flow"
-                      >
-                        ▼
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onPopOutFromContainer(child.id)}
-                        className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-red-500/15 text-red-500 hover:bg-red-500/25 transition"
-                        title="Un-nest back to canvas"
-                      >
-                        Pop Out
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                      {editingContainerId === el.id ? 'Exit Inside' : 'Edit Inside'}
+                    </button>
+                  )}
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 font-semibold">
+                    {nestedChildren.length} {nestedChildren.length === 1 ? 'Item' : 'Items'}
+                  </span>
+                </div>
               </div>
-            )}
-          </div>
-        </div>
+
+              <div className="space-y-1">
+                <span style={{ color: 'var(--text-muted)' }} className="block text-[10px] font-mono">
+                  Inner Flow / Structure:
+                </span>
+                <div className="flex flex-wrap gap-1 text-[10px] font-mono">
+                  {(
+                    [
+                      { id: 'flex_col', label: 'Stack ⬇' },
+                      { id: 'flex_row', label: 'Row ➡' },
+                      { id: 'grid_2', label: '2-Col ⊞' },
+                      { id: 'grid_3', label: '3-Col ▦' },
+                      { id: 'freeform_offset', label: 'Free ⤹' },
+                    ] as const
+                  ).map((mode) => (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      onClick={() => updateSelected({ containerLayout: mode.id })}
+                      style={{
+                        backgroundColor:
+                          (el.containerLayout || 'flex_col') === mode.id
+                            ? 'var(--accent)'
+                            : 'var(--bg-input)',
+                        borderColor: 'var(--border-strong)',
+                        color: (el.containerLayout || 'flex_col') === mode.id ? '#fff' : 'inherit',
+                      }}
+                      className="flex-1 min-w-[66px] py-1 px-1.5 rounded-[5px] border text-center font-medium transition whitespace-nowrap"
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                <label>
+                  <span style={{ color: 'var(--text-muted)' }} className="block mb-1">
+                    Inner Gap ({el.containerGap !== undefined ? el.containerGap : 8}px)
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={32}
+                    value={el.containerGap !== undefined ? el.containerGap : 8}
+                    onChange={(e) => updateSelected({ containerGap: parseInt(e.target.value, 10) })}
+                    className="w-full accent-accent"
+                  />
+                </label>
+                <label>
+                  <span style={{ color: 'var(--text-muted)' }} className="block mb-1">Align Items</span>
+                  <select
+                    value={el.containerAlign || 'stretch'}
+                    onChange={(e) =>
+                      updateSelected({ containerAlign: e.target.value as DesignElement['containerAlign'] })
+                    }
+                    style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+                    className="w-full border rounded-[5px] px-1.5 py-1 text-[10px]"
+                  >
+                    <option value="stretch">Stretch (Full width)</option>
+                    <option value="start">Start (Left / Top)</option>
+                    <option value="center">Center</option>
+                    <option value="end">End (Right / Bottom)</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="space-y-1.5 pt-1">
+                <span style={{ color: 'var(--text-muted)' }} className="block text-[10px] font-mono">
+                  Contained Children ({nestedChildren.length}):
+                </span>
+                {nestedChildren.length === 0 ? (
+                  <div className="p-2 border border-dashed rounded-[6px] text-center text-[10px] text-stone-400">
+                    No items nested yet. Select other canvas elements and choose &quot;Nest Inside Container Box&quot;.
+                  </div>
+                ) : (
+                  <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                    {nestedChildren.map((child, idx) => (
+                      <div
+                        key={child.id}
+                        style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}
+                        className="flex items-center justify-between p-1.5 rounded-[5px] border text-[11px]"
+                      >
+                        <div
+                          className="flex items-center gap-1.5 truncate flex-1 cursor-pointer"
+                          onClick={() => onSelectElementById(child.id)}
+                          title="Click to inspect this child"
+                        >
+                          <span className="font-mono text-[9px] opacity-60">#{idx + 1}</span>
+                          <span className="font-semibold truncate">{child.label}</span>
+                          <span className="text-[9px] opacity-50 font-mono font-normal">({child.type})</span>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0 ml-1">
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={() => onReorderNestedChild(el.id, child.id, 'up')}
+                            className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 disabled:opacity-30 text-[10px]"
+                            title="Move Earlier in Flow"
+                          >
+                            ▲
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === nestedChildren.length - 1}
+                            onClick={() => onReorderNestedChild(el.id, child.id, 'down')}
+                            className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 disabled:opacity-30 text-[10px]"
+                            title="Move Later in Flow"
+                          >
+                            ▼
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onPopOutFromContainer(child.id)}
+                            className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-red-500/15 text-red-500 hover:bg-red-500/25 transition"
+                            title="Un-nest back to canvas"
+                          >
+                            Pop Out
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </InspectorSubExpander>
       )}
     </div>
   );

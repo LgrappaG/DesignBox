@@ -1,5 +1,5 @@
 import React from 'react';
-import { Palette } from 'lucide-react';
+import { Link as LinkIcon, Unlink } from 'lucide-react';
 import { BgPattern, BorderStyle, DesignElement } from '../../types/schema';
 import {
   GradientAndBgImageSection,
@@ -12,6 +12,7 @@ import {
   getDisplayBorderStyle,
   getDisplayBorderWidth,
 } from '../../utils/borderHelpers';
+import { InspectorSubExpander } from './InspectorCollapsibleSection';
 
 interface StyleSurfaceAndColorsSectionProps {
   el: DesignElement;
@@ -51,7 +52,21 @@ export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSection
   const displayBorderWidth = getDisplayBorderWidth(el);
   const displayBorderStyle = getDisplayBorderStyle(el);
   const displayBorderColor = getDisplayBorderColor(el);
-  const hasCustomPerSideBorders = el.bordersLinked === false && el.type !== 'pure_line';
+  const isLine = el.type === 'pure_line';
+  const brdLinked = isLine ? true : el.bordersLinked !== false;
+
+  const borderSides: ReadonlyArray<{
+    key: 'Top' | 'Right' | 'Bottom' | 'Left';
+    short: string;
+    wKey: keyof DesignElement;
+    sKey: keyof DesignElement;
+    cKey: keyof DesignElement;
+  }> = [
+    { key: 'Top', short: 'TOP', wKey: 'borderTopWidth', sKey: 'borderTopStyle', cKey: 'borderTopColor' },
+    { key: 'Right', short: 'RIGHT', wKey: 'borderRightWidth', sKey: 'borderRightStyle', cKey: 'borderRightColor' },
+    { key: 'Bottom', short: 'BOTTOM', wKey: 'borderBottomWidth', sKey: 'borderBottomStyle', cKey: 'borderBottomColor' },
+    { key: 'Left', short: 'LEFT', wKey: 'borderLeftWidth', sKey: 'borderLeftStyle', cKey: 'borderLeftColor' },
+  ];
 
   const channels: ReadonlyArray<{
     key: 'bgColor' | 'borderColor' | 'textColor';
@@ -100,19 +115,12 @@ export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSection
   };
 
   return (
-    <div className="space-y-3">
-      {/* Unified Color, Border, Swatches & Surface Card */}
-      <div
-        style={{
-          backgroundColor: 'var(--bg-panel-alt)',
-          borderColor: 'var(--border-main)',
-        }}
-        className="p-2.5 rounded-[8px] border space-y-2.5"
-      >
+    <div className="space-y-2.5">
+      {/* Unified Color, Border, Swatches & Surface */}
+      <div className="space-y-2.5">
         <div className="flex items-center justify-between gap-2">
-          <span className="font-semibold text-[11px] flex items-center gap-1.5 min-w-0">
-            <Palette className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--accent)' }} />
-            <span className="truncate">Colors, Border &amp; Surface</span>
+          <span style={{ color: 'var(--text-muted)' }} className="text-[10px] font-medium">
+            Active Channel: <strong style={{ color: 'var(--text-main)' }}>{activeChannelLabel}</strong>
           </span>
           <button
             type="button"
@@ -231,48 +239,67 @@ export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSection
           )}
         </div>
 
-        {/* Quick Border Thickness & Style Controls */}
+        {/* Unified Border Thickness, Style & 4-Side Controls */}
         <div className="pt-2 border-t border-[var(--border-main)] space-y-1.5">
           <div className="flex items-center justify-between gap-2 text-[10px]">
             <span style={{ color: 'var(--text-muted)' }} className="font-medium">
-              {el.type === 'pure_line' ? 'Line Thickness & Style' : 'Border Thickness & Style'}
+              {isLine
+                ? 'Line Thickness & Style'
+                : brdLinked
+                  ? 'Border Thickness & Style'
+                  : 'Per-Side Borders (Accent Rails)'}
             </span>
-            {hasCustomPerSideBorders && (
-              <span
-                style={{
-                  backgroundColor: 'var(--accent-soft)',
-                  color: 'var(--accent)',
+            {!isLine && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (brdLinked) {
+                    updateSelected({
+                      bordersLinked: false,
+                      borderTopWidth: el.borderTopWidth ?? el.borderWidth ?? 1,
+                      borderTopStyle: el.borderTopStyle || el.borderStyle || 'solid',
+                      borderTopColor: el.borderTopColor || el.borderColor,
+                      borderRightWidth: el.borderRightWidth ?? el.borderWidth ?? 1,
+                      borderRightStyle: el.borderRightStyle || el.borderStyle || 'solid',
+                      borderRightColor: el.borderRightColor || el.borderColor,
+                      borderBottomWidth: el.borderBottomWidth ?? el.borderWidth ?? 1,
+                      borderBottomStyle: el.borderBottomStyle || el.borderStyle || 'solid',
+                      borderBottomColor: el.borderBottomColor || el.borderColor,
+                      borderLeftWidth: el.borderLeftWidth ?? el.borderWidth ?? 1,
+                      borderLeftStyle: el.borderLeftStyle || el.borderStyle || 'solid',
+                      borderLeftColor: el.borderLeftColor || el.borderColor,
+                    });
+                  } else {
+                    updateSelected(
+                      buildUniformBorderPatch(el, {
+                        borderWidth: displayBorderWidth,
+                        borderStyle: displayBorderStyle,
+                        borderColor: displayBorderColor,
+                      })
+                    );
+                  }
                 }}
-                className="px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold"
-                title="Custom 4-side borders configured in Layout. Adjusting here syncs all 4 sides."
+                style={{
+                  backgroundColor: 'var(--bg-input)',
+                  borderColor: 'var(--border-strong)',
+                  color: !brdLinked ? 'var(--accent)' : 'inherit',
+                }}
+                className="flex items-center gap-1 border px-1.5 py-0.5 rounded-[4px] text-[9px] font-mono hover:opacity-85"
+                title="Switch between Uniform border and independent 4-side borders"
               >
-                4-Side Custom
-              </span>
+                {brdLinked ? <LinkIcon className="w-2.5 h-2.5" /> : <Unlink className="w-2.5 h-2.5" />}
+                <span>{brdLinked ? 'Uniform' : '4-Side'}</span>
+              </button>
             )}
           </div>
 
-          <div className="grid grid-cols-[1fr_54px_86px] gap-1.5 items-center">
-            <input
-              type="range"
-              min={el.type === 'pure_line' ? 1 : 0}
-              max={16}
-              value={Math.min(16, displayBorderWidth)}
-              onChange={(e) =>
-                updateSelected(
-                  buildUniformBorderPatch(el, {
-                    borderWidth: parseInt(e.target.value, 10) || 0,
-                  })
-                )
-              }
-              className="w-full accent-[var(--accent)] cursor-pointer min-w-0"
-              title={`Border Width: ${displayBorderWidth}px`}
-            />
-            <div className="relative flex items-center">
+          {brdLinked ? (
+            <div className="grid grid-cols-[1fr_54px_86px] gap-1.5 items-center">
               <input
-                type="number"
-                min={el.type === 'pure_line' ? 1 : 0}
-                max={24}
-                value={displayBorderWidth}
+                type="range"
+                min={isLine ? 1 : 0}
+                max={16}
+                value={Math.min(16, displayBorderWidth)}
                 onChange={(e) =>
                   updateSelected(
                     buildUniformBorderPatch(el, {
@@ -280,43 +307,125 @@ export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSection
                     })
                   )
                 }
+                className="w-full accent-[var(--accent)] cursor-pointer min-w-0"
+                title={`Border Width: ${displayBorderWidth}px`}
+              />
+              <div className="relative flex items-center">
+                <input
+                  type="number"
+                  min={isLine ? 1 : 0}
+                  max={24}
+                  value={displayBorderWidth}
+                  onChange={(e) =>
+                    updateSelected(
+                      buildUniformBorderPatch(el, {
+                        borderWidth: parseInt(e.target.value, 10) || 0,
+                      })
+                    )
+                  }
+                  style={{
+                    backgroundColor: 'var(--bg-input)',
+                    borderColor: 'var(--border-strong)',
+                  }}
+                  className="w-full border rounded-[5px] pl-1.5 pr-4 py-1 text-[10px] font-mono text-center"
+                  title="Border Thickness (px)"
+                />
+                <span
+                  style={{ color: 'var(--text-muted)' }}
+                  className="absolute right-1 text-[8px] font-mono pointer-events-none"
+                >
+                  px
+                </span>
+              </div>
+              <select
+                value={displayBorderStyle}
+                onChange={(e) =>
+                  updateSelected(
+                    buildUniformBorderPatch(el, {
+                      borderStyle: e.target.value as BorderStyle,
+                    })
+                  )
+                }
                 style={{
                   backgroundColor: 'var(--bg-input)',
                   borderColor: 'var(--border-strong)',
                 }}
-                className="w-full border rounded-[5px] pl-1.5 pr-4 py-1 text-[10px] font-mono text-center"
-                title="Border Thickness (px)"
-              />
-              <span
-                style={{ color: 'var(--text-muted)' }}
-                className="absolute right-1 text-[8px] font-mono pointer-events-none"
+                className="w-full border rounded-[5px] px-1.5 py-1 text-[10px]"
+                title="Border Style"
               >
-                px
-              </span>
+                {BORDER_STYLES.map((st) => (
+                  <option key={st.value} value={st.value}>
+                    {st.label}
+                  </option>
+                ))}
+              </select>
             </div>
-            <select
-              value={displayBorderStyle}
-              onChange={(e) =>
-                updateSelected(
-                  buildUniformBorderPatch(el, {
-                    borderStyle: e.target.value as BorderStyle,
-                  })
-                )
-              }
-              style={{
-                backgroundColor: 'var(--bg-input)',
-                borderColor: 'var(--border-strong)',
-              }}
-              className="w-full border rounded-[5px] px-1.5 py-1 text-[10px]"
-              title="Border Style"
-            >
-              {BORDER_STYLES.map((st) => (
-                <option key={st.value} value={st.value}>
-                  {st.label}
-                </option>
+          ) : (
+            <div className="space-y-1">
+              <div
+                className="grid grid-cols-[42px_46px_1fr_32px] gap-1 text-[8.5px] font-mono uppercase tracking-wider px-0.5"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <span>Side</span>
+                <span>Px</span>
+                <span>Style</span>
+                <span className="text-center">Col</span>
+              </div>
+              {borderSides.map((s) => (
+                <div
+                  key={s.key}
+                  className="grid grid-cols-[42px_46px_1fr_32px] gap-1 items-center text-[10px]"
+                >
+                  <span className="font-mono text-[9px] opacity-70">{s.short}</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={24}
+                    value={(el[s.wKey] as number | undefined) ?? el.borderWidth ?? 0}
+                    onChange={(e) =>
+                      updateSelected({
+                        [s.wKey]: Math.max(0, parseInt(e.target.value, 10) || 0),
+                      } as Partial<DesignElement>)
+                    }
+                    style={{
+                      backgroundColor: 'var(--bg-input)',
+                      borderColor: 'var(--border-strong)',
+                    }}
+                    className="border rounded-[4px] px-1 py-1 font-mono text-center h-7"
+                  />
+                  <select
+                    value={(el[s.sKey] as BorderStyle | undefined) || el.borderStyle || 'solid'}
+                    onChange={(e) =>
+                      updateSelected({
+                        [s.sKey]: e.target.value as BorderStyle,
+                      } as Partial<DesignElement>)
+                    }
+                    style={{
+                      backgroundColor: 'var(--bg-input)',
+                      borderColor: 'var(--border-strong)',
+                    }}
+                    className="border rounded-[4px] px-1 py-1 text-[10px] h-7"
+                  >
+                    {BORDER_STYLES.map((st) => (
+                      <option key={st.value} value={st.value}>
+                        {st.label}
+                      </option>
+                    ))}
+                  </select>
+                  <StudioColorButton
+                    compact
+                    value={(el[s.cKey] as string | undefined) || el.borderColor}
+                    onChange={(nextColor) =>
+                      updateSelected({ [s.cKey]: nextColor } as Partial<DesignElement>)
+                    }
+                    fallbackHex="#E5E5E5"
+                    swatches={swatches}
+                    title={`${s.key} Border Color`}
+                  />
+                </div>
               ))}
-            </select>
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Integrated Character Swatches */}
@@ -397,20 +506,38 @@ export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSection
       </div>
 
       {/* Gradient & Inline Container BG Image */}
-      <GradientAndBgImageSection
-        el={el}
-        updateSelected={updateSelected}
-        isToyhouseFree={isToyhouseFree}
-        swatches={swatches}
-      />
+      <InspectorSubExpander
+        title="Gradient & Background Image"
+        isActive={Boolean(el.bgGradientTo || el.bgImageUrl?.trim())}
+        summary={
+          el.bgImageUrl?.trim()
+            ? 'BG Image'
+            : el.bgGradientTo
+              ? el.bgGradientType || 'linear'
+              : 'Off'
+        }
+      >
+        <GradientAndBgImageSection
+          el={el}
+          updateSelected={updateSelected}
+          isToyhouseFree={isToyhouseFree}
+          swatches={swatches}
+        />
+      </InspectorSubExpander>
 
-      {/* Quick Surface Recipes (Pure & Normal) */}
-      <PureSurfaceSculptorSection
-        el={el}
-        updateSelected={updateSelected}
-        isToyhouseFree={isToyhouseFree}
-        swatches={swatches}
-      />
+      {/* Quick Surface Recipes & Shape Cut */}
+      <InspectorSubExpander
+        title="Surface Shape Cut & Presets"
+        isActive={Boolean(el.boxClipShape && el.boxClipShape !== 'rect')}
+        summary={el.boxClipShape && el.boxClipShape !== 'rect' ? el.boxClipShape : 'Rect'}
+      >
+        <PureSurfaceSculptorSection
+          el={el}
+          updateSelected={updateSelected}
+          isToyhouseFree={isToyhouseFree}
+          swatches={swatches}
+        />
+      </InspectorSubExpander>
     </div>
   );
 };

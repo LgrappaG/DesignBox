@@ -1,20 +1,14 @@
 import React, { useState } from 'react';
 import {
-  Crop,
   FlipHorizontal,
   FlipVertical,
   Grid,
   Image as ImageIcon,
-  Link2,
-  MousePointerClick,
   Network,
   Plus,
-  RotateCw,
-  Sliders,
   Sparkles,
   Trash2,
   UploadCloud,
-  X,
 } from 'lucide-react';
 import { FaIconBrowser } from '../shared/FaIconBrowser';
 import { StudioColorButton } from '../shared/StudioColorPicker';
@@ -24,15 +18,15 @@ import {
   MAX_SHAPE_CUT_PX,
   MIN_SHAPE_CUT_PX,
 } from '../../utils/f2uShapeCss';
+import { shouldShowPrimaryTextField } from '../../utils/inspectorHelpers';
+import { InspectorSubExpander } from './InspectorCollapsibleSection';
 import {
   CustomPropDefinition,
   DesignElement,
   GalleryItem,
   IdleAnimation,
   ImageBlendMode,
-  ImageClickAction,
   ImageFrameStyle,
-  ImageHoverAction,
   ImageShape,
   CharacterRelationNode,
 } from '../../types/schema';
@@ -90,9 +84,12 @@ const DEFAULT_RELATION_NODES: CharacterRelationNode[] = [
 
 const SUBCONTENT_EXCLUDED_TYPES = new Set([
   'image',
+  'pure_image_slot',
   'button',
   'badge',
   'divider',
+  'pure_divider',
+  'pure_line',
   'washi_tape',
   'lace_divider',
   'sticker',
@@ -100,15 +97,6 @@ const SUBCONTENT_EXCLUDED_TYPES = new Set([
   'tabs',
   'gallery',
   'moodboard',
-]);
-
-const LINK_EXCLUDED_TYPES = new Set([
-  'tabs',
-  'pure_f2u_tabs',
-  'accordion',
-  'pure_spoiler',
-  'pure_collapse',
-  'social_links',
 ]);
 
 function getSubContentLabel(type: DesignElement['type']): string {
@@ -161,21 +149,23 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
 
   return (
     <div className="space-y-2.5">
-      <label className="block">
-        <span style={{ color: 'var(--text-muted)' }} className="block mb-1 text-[11px]">
-          Primary Text / Heading ({'{{title}}'})
-        </span>
-        <input
-          type="text"
-          value={el.content}
-          onChange={(e) => updateSelected({ content: e.target.value })}
-          style={{
-            backgroundColor: 'var(--bg-input)',
-            borderColor: 'var(--border-strong)',
-          }}
-          className="w-full border rounded-[6px] px-2 py-1 text-xs"
-        />
-      </label>
+      {shouldShowPrimaryTextField(el) && (
+        <label className="block">
+          <span style={{ color: 'var(--text-muted)' }} className="block mb-1 text-[11px]">
+            Primary Text / Heading ({'{{title}}'})
+          </span>
+          <input
+            type="text"
+            value={el.content}
+            onChange={(e) => updateSelected({ content: e.target.value })}
+            style={{
+              backgroundColor: 'var(--bg-input)',
+              borderColor: 'var(--border-strong)',
+            }}
+            className="w-full border rounded-[6px] px-2 py-1 text-xs"
+          />
+        </label>
+      )}
 
       {!SUBCONTENT_EXCLUDED_TYPES.has(el.type) && (
         <label className="block">
@@ -194,106 +184,6 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
           />
         </label>
       )}
-
-      {!LINK_EXCLUDED_TYPES.has(el.type) &&
-        !el.collapsible &&
-        el.f2uCollapseRole !== 'trigger' && (() => {
-          const isPrimaryUrlLink = el.type === 'button' || el.type === 'pure_link';
-          const isImageLike = el.type === 'image' || el.type === 'pure_image_slot';
-          const currentLinkValue = isPrimaryUrlLink
-            ? (el.linkUrl !== undefined ? el.linkUrl : el.url || '')
-            : el.linkUrl || '';
-          const handleLinkChange = (nextUrl: string) => {
-            if (isPrimaryUrlLink) {
-              updateSelected({ url: nextUrl, linkUrl: nextUrl });
-            } else if (isImageLike) {
-              updateSelected({
-                linkUrl: nextUrl,
-                clickAction: nextUrl.trim()
-                  ? 'link'
-                  : el.clickAction === 'link'
-                  ? 'none'
-                  : el.clickAction,
-              });
-            } else {
-              updateSelected({ linkUrl: nextUrl });
-            }
-          };
-          const handleClearLink = () => {
-            if (isPrimaryUrlLink) {
-              updateSelected({ url: '', linkUrl: '' });
-            } else if (isImageLike) {
-              updateSelected({
-                linkUrl: '',
-                ...(el.clickAction === 'link' ? { clickAction: 'none' as const } : {}),
-              });
-            } else {
-              updateSelected({ linkUrl: '' });
-            }
-          };
-          return (
-            <div
-              style={{
-                backgroundColor: 'var(--bg-panel-alt)',
-                borderColor: currentLinkValue.trim() ? 'var(--accent)' : 'var(--border-main)',
-              }}
-              className="p-2 rounded-[7px] border space-y-1.5"
-            >
-              <div className="flex items-center justify-between text-[10px]">
-                <span className="font-semibold flex items-center gap-1">
-                  <Link2 className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-                  <span>Click Link (URL)</span>
-                </span>
-                <span className="text-[9px] font-mono opacity-65">F2U Safe &lt;a&gt;</span>
-              </div>
-              <div className="grid grid-cols-[1fr_84px] gap-1.5 items-center">
-                <div className="relative flex items-center">
-                  <input
-                    type="text"
-                    placeholder="https://toyhou.se/~..."
-                    value={currentLinkValue}
-                    onChange={(e) => handleLinkChange(e.target.value)}
-                    style={{
-                      backgroundColor: 'var(--bg-input)',
-                      borderColor: 'var(--border-strong)',
-                    }}
-                    className="w-full border rounded-[5px] pl-2 pr-6 py-1 text-[11px] font-mono"
-                  />
-                  {currentLinkValue.trim() && (
-                    <button
-                      type="button"
-                      onClick={handleClearLink}
-                      title="Remove link"
-                      style={{ color: 'var(--text-muted)' }}
-                      className="absolute right-1.5 p-0.5 rounded hover:text-red-400 transition"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
-                <select
-                  aria-label="Link Target"
-                  value={el.linkTarget || '_blank'}
-                  onChange={(e) => updateSelected({ linkTarget: e.target.value as '_blank' | '_self' })}
-                  style={{
-                    backgroundColor: 'var(--bg-input)',
-                    borderColor: 'var(--border-strong)',
-                  }}
-                  className="w-full border rounded-[5px] px-1.5 py-1 text-[10px]"
-                  title="Open link in new tab (_blank) or same tab (_self)"
-                >
-                  <option value="_blank">New Tab (_blank)</option>
-                  <option value="_self">Same Tab (_self)</option>
-                </select>
-              </div>
-              {isImageLike && el.clickAction === 'lightbox' && (
-                <p className="text-[9.5px] opacity-75 leading-tight" style={{ color: 'var(--text-muted)' }}>
-                  Lightbox is active — entering a URL switches click action to Link.
-                </p>
-              )}
-            </div>
-          );
-        })()}
 
       {/* Interactive Tabs Editor */}
       {(el.type === 'tabs' || el.type === 'pure_f2u_tabs') && (
@@ -820,19 +710,13 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
 
       {/* Dynamic Image Inspector */}
       {(el.type === 'image' || el.type === 'pure_image_slot') && (
-        <div
-          style={{
-            backgroundColor: 'var(--bg-panel-alt)',
-            borderColor: 'var(--border-main)',
-          }}
-          className="space-y-2.5 p-3 rounded-[8px] border"
-        >
-          <div className="flex items-center justify-between border-b border-black/10 pb-1.5">
-            <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--accent)' }}>
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between pb-1 border-b border-[var(--border-main)]">
+            <span className="font-semibold text-[11px] flex items-center gap-1.5" style={{ color: 'var(--accent)' }}>
               <ImageIcon className="w-3.5 h-3.5" />
-              <span>Dynamic Image Inspector</span>
+              <span>Image Source &amp; Framing</span>
             </span>
-            <span className="text-[10px] font-mono opacity-60">Solo Art Object</span>
+            <span className="text-[9.5px] font-mono opacity-60">Solo Art Object</span>
           </div>
 
           <button
@@ -1049,11 +933,35 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
             </div>
           )}
 
-          <div className="pt-2 border-t border-black/10 space-y-1.5">
+          <label className="block">
+            <span style={{ color: 'var(--text-muted)' }} className="block mb-0.5 text-[10px]">
+              Frame Caption (Optional)
+            </span>
+            <input
+              type="text"
+              placeholder="Optional caption / Polaroid label..."
+              value={el.content}
+              onChange={(e) => updateSelected({ content: e.target.value })}
+              style={{
+                backgroundColor: 'var(--bg-input)',
+                borderColor: 'var(--border-strong)',
+              }}
+              className="w-full border rounded-[5px] px-2 py-1 text-[11px]"
+            />
+          </label>
+
+          <InspectorSubExpander
+            title="Pan, Zoom & Focal Crop"
+            isActive={
+              (el.imgZoom ?? 100) !== 100 ||
+              (el.panX ?? 50) !== 50 ||
+              (el.panY ?? 50) !== 50
+            }
+            summary={`${el.imgZoom ?? 100}% · ${el.panX ?? 50},${el.panY ?? 50}`}
+          >
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-[10px] flex items-center gap-1">
-                <Crop className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-                <span>Pan, Zoom &amp; Focal Crop</span>
+              <span style={{ color: 'var(--text-muted)' }} className="text-[9.5px] font-mono">
+                F2U Safe Background Crop
               </span>
               <button
                 type="button"
@@ -1065,7 +973,7 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 pt-0.5">
+            <div className="grid grid-cols-2 gap-2">
               <label className="text-[10px]">
                 <span style={{ color: 'var(--text-muted)' }} className="block mb-0.5">Engine:</span>
                 <select
@@ -1137,13 +1045,21 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
                 />
               </label>
             </div>
-          </div>
+          </InspectorSubExpander>
 
-          <div className="pt-2 border-t border-black/10 space-y-1.5">
+          <InspectorSubExpander
+            title="Transform & Blending"
+            isActive={Boolean(
+              el.flipH ||
+                el.flipV ||
+                (el.imgRotation ?? 0) !== 0 ||
+                (el.blendMode && el.blendMode !== 'normal')
+            )}
+            summary={`${el.imgRotation ?? 0}° · ${el.blendMode || 'normal'}`}
+          >
             <div className="flex items-center justify-between text-[10px]">
-              <span className="font-semibold flex items-center gap-1">
-                <RotateCw className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-                <span>Transform &amp; Blending</span>
+              <span style={{ color: 'var(--text-muted)' }} className="font-mono text-[9.5px]">
+                Snap Rotate
               </span>
               <div className="flex items-center gap-1">
                 {[0, 90, 180, 270].map((deg) => (
@@ -1236,264 +1152,165 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
                   ))}
               </div>
             )}
-          </div>
+          </InspectorSubExpander>
 
-          <div className="pt-2 border-t border-[var(--border-main)] space-y-1.5">
-            <span className="font-semibold text-[10px] block">Color Tint / Overlay Layer</span>
-            <div className="grid grid-cols-2 gap-2 text-[10px] items-center">
-              <StudioColorButton
-                value={el.overlayColor || '#C86D51'}
-                onChange={(nextColor) => updateSelected({ overlayColor: nextColor })}
-                fallbackHex="#C86D51"
-                allowTransparent={false}
-                swatches={swatches}
-                fullWidth
-                title="Tint Overlay Color"
-              />
-              <label className="block">
-                <span style={{ color: 'var(--text-muted)' }} className="block mb-0.5">
-                  Opacity ({el.overlayOpacity ?? 0}%)
-                </span>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={el.overlayOpacity ?? 0}
-                  onChange={(e) => updateSelected({ overlayOpacity: parseInt(e.target.value, 10) })}
-                  className="w-full"
+          <InspectorSubExpander
+            title="Filters & Color Tint"
+            isActive={Boolean(
+              (el.overlayOpacity ?? 0) > 0 ||
+                (el.filterPreset && el.filterPreset !== 'normal') ||
+                (el.imgBrightness ?? 100) !== 100 ||
+                (el.imgContrast ?? 100) !== 100 ||
+                (el.imgSepia ?? 0) !== 0 ||
+                (el.imgGrayscale ?? 0) !== 0
+            )}
+            summary={
+              el.filterPreset && el.filterPreset !== 'normal'
+                ? el.filterPreset
+                : (el.overlayOpacity ?? 0) > 0
+                  ? `Tint ${el.overlayOpacity}%`
+                  : 'Normal'
+            }
+          >
+            <div className="space-y-1.5">
+              <span className="font-semibold text-[10px] block">Color Tint / Overlay Layer</span>
+              <div className="grid grid-cols-2 gap-2 text-[10px] items-center">
+                <StudioColorButton
+                  value={el.overlayColor || '#C86D51'}
+                  onChange={(nextColor) => updateSelected({ overlayColor: nextColor })}
+                  fallbackHex="#C86D51"
+                  allowTransparent={false}
+                  swatches={swatches}
+                  fullWidth
+                  title="Tint Overlay Color"
                 />
-              </label>
+                <label className="block">
+                  <span style={{ color: 'var(--text-muted)' }} className="block mb-0.5">
+                    Opacity ({el.overlayOpacity ?? 0}%)
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={el.overlayOpacity ?? 0}
+                    onChange={(e) => updateSelected({ overlayOpacity: parseInt(e.target.value, 10) })}
+                    className="w-full"
+                  />
+                </label>
+              </div>
             </div>
-          </div>
 
-          <div className="pt-2 border-t border-black/10 space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-[10px] flex items-center gap-1">
-                <Sliders className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-                <span>Filter Presets &amp; Tuning</span>
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  updateSelected({
-                    imgBrightness: 100,
-                    imgContrast: 100,
-                    imgGrayscale: 0,
-                    imgSepia: 0,
-                    imgBlur: 0,
-                    filterPreset: 'normal',
-                  })
-                }
-                style={{ color: 'var(--accent)' }}
-                className="text-[9px] font-mono hover:underline"
-              >
-                Reset
-              </button>
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {[
-                { name: 'Normal', b: 100, c: 100, g: 0, s: 0, bl: 0 },
-                { name: 'Vintage', b: 105, c: 90, g: 10, s: 45, bl: 0 },
-                { name: 'Noir', b: 110, c: 135, g: 100, s: 0, bl: 0 },
-                { name: 'Dreamy', b: 110, c: 95, g: 0, s: 15, bl: 1 },
-                { name: 'Vibrant', b: 108, c: 125, g: 0, s: 0, bl: 0 },
-                { name: 'Sepia', b: 100, c: 100, g: 0, s: 75, bl: 0 },
-              ].map((pr) => (
+            <div className="pt-2 border-t border-[var(--border-main)] space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-[10px]">Filter Presets &amp; Tuning</span>
                 <button
-                  key={pr.name}
                   type="button"
                   onClick={() =>
                     updateSelected({
-                      imgBrightness: pr.b,
-                      imgContrast: pr.c,
-                      imgGrayscale: pr.g,
-                      imgSepia: pr.s,
-                      imgBlur: pr.bl,
-                      filterPreset: pr.name.toLowerCase(),
+                      imgBrightness: 100,
+                      imgContrast: 100,
+                      imgGrayscale: 0,
+                      imgSepia: 0,
+                      imgBlur: 0,
+                      filterPreset: 'normal',
                     })
                   }
-                  style={{
-                    backgroundColor:
-                      el.filterPreset === pr.name.toLowerCase() ? 'var(--accent)' : 'var(--bg-input)',
-                    color: el.filterPreset === pr.name.toLowerCase() ? '#fff' : 'inherit',
-                    borderColor: 'var(--border-strong)',
-                  }}
-                  className="px-2 py-0.5 rounded-[4px] border text-[9px] font-medium transition"
+                  style={{ color: 'var(--accent)' }}
+                  className="text-[9px] font-mono hover:underline"
                 >
-                  {pr.name}
+                  Reset
                 </button>
-              ))}
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-[10px]">
-              <label>
-                <span style={{ color: 'var(--text-muted)' }} className="block">
-                  Brightness ({el.imgBrightness ?? 100}%)
-                </span>
-                <input
-                  type="range"
-                  min={50}
-                  max={150}
-                  value={el.imgBrightness ?? 100}
-                  onChange={(e) => updateSelected({ imgBrightness: parseInt(e.target.value, 10) })}
-                  className="w-full"
-                />
-              </label>
-              <label>
-                <span style={{ color: 'var(--text-muted)' }} className="block">
-                  Contrast ({el.imgContrast ?? 100}%)
-                </span>
-                <input
-                  type="range"
-                  min={50}
-                  max={150}
-                  value={el.imgContrast ?? 100}
-                  onChange={(e) => updateSelected({ imgContrast: parseInt(e.target.value, 10) })}
-                  className="w-full"
-                />
-              </label>
-              <label>
-                <span style={{ color: 'var(--text-muted)' }} className="block">
-                  Sepia ({el.imgSepia ?? 0}%)
-                </span>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={el.imgSepia ?? 0}
-                  onChange={(e) => updateSelected({ imgSepia: parseInt(e.target.value, 10) })}
-                  className="w-full"
-                />
-              </label>
-              <label>
-                <span style={{ color: 'var(--text-muted)' }} className="block">
-                  Grayscale ({el.imgGrayscale ?? 0}%)
-                </span>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={el.imgGrayscale ?? 0}
-                  onChange={(e) => updateSelected({ imgGrayscale: parseInt(e.target.value, 10) })}
-                  className="w-full"
-                />
-              </label>
-            </div>
-          </div>
-
-          <div className="pt-2 border-t border-black/10 space-y-2">
-            <span className="font-semibold text-[10px] flex items-center gap-1">
-              <MousePointerClick className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-              <span>Interactivity &amp; Object Binding</span>
-            </span>
-
-            <label className="flex items-center gap-2 cursor-pointer text-[10px]">
-              <input
-                type="checkbox"
-                checked={Boolean(el.asBackgroundFill)}
-                onChange={(e) => updateSelected({ asBackgroundFill: e.target.checked })}
-                className="rounded"
-              />
-              <span className="font-medium">Use as Full-Bleed Container Background</span>
-            </label>
-
-            <div className="grid grid-cols-2 gap-2 text-[10px]">
-              <label className="block">
-                <span className="block mb-0.5 opacity-80">Click Action</span>
-                <select
-                  value={el.clickAction || 'none'}
-                  onChange={(e) => updateSelected({ clickAction: e.target.value as ImageClickAction })}
-                  style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                  className="w-full border rounded-[5px] px-1.5 py-1 text-[10px]"
-                >
-                  <option value="none">None (Standard)</option>
-                  <option value="lightbox">Expand Lightbox Modal</option>
-                  <option value="link">Open External Link</option>
-                </select>
-              </label>
-              <label className="block">
-                <span className="block mb-0.5 opacity-80">
-                  Hover Action {isToyhouseFree ? '(Premium)' : ''}
-                </span>
-                <select
-                  value={el.hoverAction || 'none'}
-                  onChange={(e) => updateSelected({ hoverAction: e.target.value as ImageHoverAction })}
-                  style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                  className="w-full border rounded-[5px] px-1.5 py-1 text-[10px]"
-                >
-                  <option value="none">None</option>
-                  <option value="swap_image">Swap Image on Hover</option>
-                  <option value="zoom">Zoom in on Hover</option>
-                  <option value="tilt">Tilt Angle on Hover</option>
-                </select>
-              </label>
-            </div>
-
-            {isToyhouseFree && el.hoverAction && el.hoverAction !== 'none' && (
-              <div className="text-[9px] text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded px-2 py-1">
-                Image CSS :hover actions require Toyhouse Premium / Carrd Pro.
               </div>
-            )}
-
-            {(el.clickAction === 'link' ||
-              (el.clickAction !== 'lightbox' && Boolean(el.linkUrl && el.linkUrl.trim()))) && (
-              <div className="grid grid-cols-[1fr_84px] gap-1.5 items-end">
-                <label className="block space-y-0.5">
-                  <span className="text-[10px] opacity-75">Target URL (opens on click)</span>
-                  <input
-                    type="text"
-                    placeholder="https://..."
-                    value={el.linkUrl || ''}
-                    onChange={(e) => {
-                      const nextUrl = e.target.value;
-                      updateSelected({
-                        linkUrl: nextUrl,
-                        clickAction: nextUrl.trim() ? 'link' : 'none',
-                      });
-                    }}
-                    style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                    className="w-full border rounded-[5px] px-2 py-1 text-[10px] font-mono"
-                  />
-                </label>
-                <label className="block space-y-0.5">
-                  <span className="text-[10px] opacity-75">Target</span>
-                  <select
-                    value={el.linkTarget || '_blank'}
-                    onChange={(e) => updateSelected({ linkTarget: e.target.value as '_blank' | '_self' })}
-                    style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                    className="w-full border rounded-[5px] px-1.5 py-1 text-[10px]"
-                  >
-                    <option value="_blank">_blank</option>
-                    <option value="_self">_self</option>
-                  </select>
-                </label>
-              </div>
-            )}
-
-            {el.hoverAction === 'swap_image' && (
-              <div className="space-y-1">
-                <span className="text-[10px] opacity-75">Secondary Image (shown on hover)</span>
-                <div className="flex gap-1.5">
-                  <input
-                    type="text"
-                    placeholder="Secondary image HTTPS link..."
-                    value={el.hoverImageUrl || ''}
-                    onChange={(e) => updateSelected({ hoverImageUrl: e.target.value })}
-                    style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                    className="flex-1 border rounded-[5px] px-2 py-1 text-[10px] font-mono"
-                  />
+              <div className="flex flex-wrap gap-1">
+                {[
+                  { name: 'Normal', b: 100, c: 100, g: 0, s: 0, bl: 0 },
+                  { name: 'Vintage', b: 105, c: 90, g: 10, s: 45, bl: 0 },
+                  { name: 'Noir', b: 110, c: 135, g: 100, s: 0, bl: 0 },
+                  { name: 'Dreamy', b: 110, c: 95, g: 0, s: 15, bl: 1 },
+                  { name: 'Vibrant', b: 108, c: 125, g: 0, s: 0, bl: 0 },
+                  { name: 'Sepia', b: 100, c: 100, g: 0, s: 75, bl: 0 },
+                ].map((pr) => (
                   <button
+                    key={pr.name}
                     type="button"
-                    onClick={() => onTriggerImageUpload('hoverImageUrl')}
-                    disabled={uploadingImage}
-                    style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
-                    className="px-2 py-1 rounded-[5px] text-[10px] font-medium transition disabled:opacity-50 shrink-0"
+                    onClick={() =>
+                      updateSelected({
+                        imgBrightness: pr.b,
+                        imgContrast: pr.c,
+                        imgGrayscale: pr.g,
+                        imgSepia: pr.s,
+                        imgBlur: pr.bl,
+                        filterPreset: pr.name.toLowerCase(),
+                      })
+                    }
+                    style={{
+                      backgroundColor:
+                        el.filterPreset === pr.name.toLowerCase() ? 'var(--accent)' : 'var(--bg-input)',
+                      color: el.filterPreset === pr.name.toLowerCase() ? '#fff' : 'inherit',
+                      borderColor: 'var(--border-strong)',
+                    }}
+                    className="px-2 py-0.5 rounded-[4px] border text-[9px] font-medium transition"
                   >
-                    Upload
+                    {pr.name}
                   </button>
-                </div>
+                ))}
               </div>
-            )}
-          </div>
+              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                <label>
+                  <span style={{ color: 'var(--text-muted)' }} className="block">
+                    Brightness ({el.imgBrightness ?? 100}%)
+                  </span>
+                  <input
+                    type="range"
+                    min={50}
+                    max={150}
+                    value={el.imgBrightness ?? 100}
+                    onChange={(e) => updateSelected({ imgBrightness: parseInt(e.target.value, 10) })}
+                    className="w-full"
+                  />
+                </label>
+                <label>
+                  <span style={{ color: 'var(--text-muted)' }} className="block">
+                    Contrast ({el.imgContrast ?? 100}%)
+                  </span>
+                  <input
+                    type="range"
+                    min={50}
+                    max={150}
+                    value={el.imgContrast ?? 100}
+                    onChange={(e) => updateSelected({ imgContrast: parseInt(e.target.value, 10) })}
+                    className="w-full"
+                  />
+                </label>
+                <label>
+                  <span style={{ color: 'var(--text-muted)' }} className="block">
+                    Sepia ({el.imgSepia ?? 0}%)
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={el.imgSepia ?? 0}
+                    onChange={(e) => updateSelected({ imgSepia: parseInt(e.target.value, 10) })}
+                    className="w-full"
+                  />
+                </label>
+                <label>
+                  <span style={{ color: 'var(--text-muted)' }} className="block">
+                    Grayscale ({el.imgGrayscale ?? 0}%)
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={el.imgGrayscale ?? 0}
+                    onChange={(e) => updateSelected({ imgGrayscale: parseInt(e.target.value, 10) })}
+                    className="w-full"
+                  />
+                </label>
+              </div>
+            </div>
+          </InspectorSubExpander>
         </div>
       )}
 

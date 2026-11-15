@@ -13,14 +13,7 @@ export const TypographySection: React.FC<TypographySectionProps> = ({
   updateSelected,
 }) => {
   return (
-    <div
-      style={{
-        backgroundColor: 'var(--bg-panel-alt)',
-        borderColor: 'var(--border-main)',
-      }}
-      className="p-2.5 rounded-[8px] border space-y-2"
-    >
-      <div className="font-semibold text-[11px]">Typography</div>
+    <div className="space-y-2">
       <div className="grid grid-cols-2 gap-2">
         <label>
           <span style={{ color: 'var(--text-muted)' }} className="block text-[10px] mb-0.5">

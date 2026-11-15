@@ -1,9 +1,9 @@
 import React from 'react';
-import { Sparkles, Square } from 'lucide-react';
-import { DesignElement, HoverEffect, IdleAnimation } from '../../types/schema';
-import { getFontAwesomeAnimClass } from '../../engine/layoutSolver';
+import { Square } from 'lucide-react';
+import { DesignElement } from '../../types/schema';
 import { ModifierStackSection } from '../ModifierStackSection';
 import { CustomShadowInspectorSection } from '../PureInspectorSections';
+import { InspectorSubExpander } from './InspectorCollapsibleSection';
 
 interface EffectsAndMotionSectionProps {
   el: DesignElement;
@@ -13,7 +13,7 @@ interface EffectsAndMotionSectionProps {
   showProControls?: boolean;
 }
 
-/** Elevation shadows, glassmorphism, custom shadows, modifier stack, interactivity & motion. */
+/** Elevation shadows, glassmorphism, custom shadows, and non-destructive modifier stack. */
 export const EffectsAndMotionSection: React.FC<EffectsAndMotionSectionProps> = ({
   el,
   updateSelected,
@@ -22,16 +22,13 @@ export const EffectsAndMotionSection: React.FC<EffectsAndMotionSectionProps> = (
   showProControls = true,
 }) => {
   const showProOnly = !isToyhouseFree || showProControls;
+  const modCount = el.modifiers?.length || 0;
+  const hasCustomShadow = Boolean(el.customBoxShadowEnabled || el.customTextShadowEnabled);
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       {/* Elevation Shadow, Glass Blur & Seamless Toggle */}
-      <div
-        style={{
-          backgroundColor: 'var(--bg-panel-alt)',
-          borderColor: 'var(--border-main)',
-        }}
-        className="p-2.5 rounded-[8px] border space-y-2.5"
-      >
+      <div className="space-y-2">
         <div className="flex items-center justify-between text-[10px]">
           <span style={{ color: 'var(--text-muted)' }} className="font-semibold">
             Elevation Shadow &amp; Glass
@@ -124,20 +121,25 @@ export const EffectsAndMotionSection: React.FC<EffectsAndMotionSectionProps> = (
       </div>
 
       {/* Custom Box & Text Shadows */}
-      <CustomShadowInspectorSection
-        el={el}
-        updateSelected={updateSelected}
-        isToyhouseFree={isToyhouseFree}
-        swatches={swatches}
-      />
+      <InspectorSubExpander
+        title="Custom Box & Text Shadows (X/Y/Blur)"
+        isActive={hasCustomShadow}
+        summary={hasCustomShadow ? 'Active' : 'Off'}
+      >
+        <CustomShadowInspectorSection
+          el={el}
+          updateSelected={updateSelected}
+          isToyhouseFree={isToyhouseFree}
+          swatches={swatches}
+        />
+      </InspectorSubExpander>
 
       {/* Non-Destructive Blender-Style Modifier Stack */}
-      <div
-        style={{
-          backgroundColor: 'var(--bg-panel)',
-          borderColor: 'var(--border-main)',
-        }}
-        className="p-2.5 rounded-[8px] border"
+      <InspectorSubExpander
+        title="Object Modifiers (Split / Cutout / Frame)"
+        defaultOpen={modCount > 0}
+        isActive={modCount > 0}
+        summary={`${modCount} Active`}
       >
         <ModifierStackSection
           el={el}
@@ -145,209 +147,7 @@ export const EffectsAndMotionSection: React.FC<EffectsAndMotionSectionProps> = (
           isToyhouseFree={isToyhouseFree}
           swatches={swatches}
         />
-      </div>
-
-      {/* Card Interactivity & Sizing */}
-      <div
-        style={{
-          backgroundColor: 'var(--bg-panel-alt)',
-          borderColor: 'var(--border-main)',
-        }}
-        className="space-y-2.5 p-2.5 rounded-[8px] border"
-      >
-        <div className="font-semibold text-[11px] flex items-center justify-between">
-          <span className="flex items-center gap-1.5" style={{ color: 'var(--accent)' }}>
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Card Interactivity &amp; Sizing</span>
-          </span>
-          <span className="text-[9px] font-mono opacity-60">F2U Safe</span>
-        </div>
-
-        <label className="block">
-          <span style={{ color: 'var(--text-muted)' }} className="block mb-0.5 text-[10px]">
-            Card Click Link (Clicking object navigates to URL)
-          </span>
-          <input
-            type="text"
-            placeholder="e.g. https://toyhou.se/~gallery or https://carrd.co"
-            value={
-              el.type === 'button' || el.type === 'pure_link'
-                ? el.linkUrl !== undefined
-                  ? el.linkUrl
-                  : el.url || ''
-                : el.linkUrl || ''
-            }
-            onChange={(e) => {
-              const nextUrl = e.target.value;
-              if (el.type === 'image' || el.type === 'pure_image_slot') {
-                updateSelected({
-                  linkUrl: nextUrl,
-                  clickAction: nextUrl.trim() ? 'link' : 'none',
-                });
-              } else if (el.type === 'button' || el.type === 'pure_link') {
-                updateSelected({ url: nextUrl, linkUrl: nextUrl });
-              } else {
-                updateSelected({ linkUrl: nextUrl });
-              }
-            }}
-            style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-            className="w-full border rounded-[5px] px-2 py-1 text-[11px] font-mono text-emerald-500"
-          />
-        </label>
-
-        <div className="pt-1.5 border-t border-[var(--border-main)] space-y-1.5">
-          <label className="flex items-center gap-2 cursor-pointer text-[10px]">
-            <input
-              type="checkbox"
-              checked={Boolean(el.collapsible)}
-              onChange={(e) => updateSelected({ collapsible: e.target.checked })}
-              className="rounded text-accent focus:ring-accent"
-            />
-            <span className="font-semibold select-none">
-              Collapsible Box (Expandable / Spoiler Container)
-            </span>
-          </label>
-
-          {el.collapsible && (
-            <div className="pl-5 space-y-1.5">
-              <input
-                type="text"
-                placeholder="Header Label (e.g. Click to Reveal Lore...)"
-                value={el.collapseHeader || ''}
-                onChange={(e) => updateSelected({ collapseHeader: e.target.value })}
-                style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                className="w-full border rounded-[4px] px-1.5 py-1 text-[10px] font-mono"
-              />
-              <label className="flex items-center gap-2 cursor-pointer text-[9px] select-none opacity-80">
-                <input
-                  type="checkbox"
-                  checked={Boolean(el.collapseDefaultOpen)}
-                  onChange={(e) => updateSelected({ collapseDefaultOpen: e.target.checked })}
-                  className="rounded text-accent"
-                />
-                <span>Start Expanded / Open by Default</span>
-              </label>
-            </div>
-          )}
-        </div>
-
-        <div className="pt-1.5 border-t border-[var(--border-main)]">
-          <label className="flex items-center gap-2 cursor-pointer text-[10px]">
-            <input
-              type="checkbox"
-              checked={Boolean(el.autoHeight)}
-              onChange={(e) => updateSelected({ autoHeight: e.target.checked })}
-              className="rounded text-accent focus:ring-accent"
-            />
-            <span className="select-none">
-              Auto-Fit Content Height (Dynamic height based on content)
-            </span>
-          </label>
-        </div>
-      </div>
-
-      {/* Hover & Idle Animations + Tooltip */}
-      <div
-        style={{
-          backgroundColor: 'var(--bg-panel-alt)',
-          borderColor: 'var(--border-main)',
-        }}
-        className="p-2.5 rounded-[8px] border space-y-2"
-      >
-        <div className={`grid gap-2 ${showProOnly ? 'grid-cols-2' : 'grid-cols-1'}`}>
-          {showProOnly && (
-            <label>
-              <span style={{ color: 'var(--text-muted)' }} className="block mb-1 text-[10px]">
-                Hover Effect {isToyhouseFree ? '(Premium)' : ''}
-              </span>
-              <select
-                value={el.hoverEffect}
-                onChange={(e) => updateSelected({ hoverEffect: e.target.value as HoverEffect })}
-                style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-                className="w-full border rounded-[5px] px-1.5 py-1 text-[11px]"
-              >
-                <option value="none">None</option>
-                <option value="lift">Hover Lift (-4px)</option>
-                <option value="tilt">Scrapbook Tilt</option>
-                <option value="scale">Smooth Scale</option>
-                <option value="glow">Warm Glow</option>
-                <option value="fade">Soft Fade</option>
-              </select>
-            </label>
-          )}
-
-          <label>
-            <span style={{ color: 'var(--text-muted)' }} className="block mb-1 text-[10px]">
-              Idle Loop Animation
-            </span>
-            <select
-              value={el.idleAnimation || 'none'}
-              onChange={(e) => updateSelected({ idleAnimation: e.target.value as IdleAnimation })}
-              style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-              className="w-full border rounded-[5px] px-1.5 py-1 text-[11px]"
-            >
-              <option value="none">None (Static)</option>
-              <option value="bounce">Spring Bounce (fa-bounce)</option>
-              <option value="rubber_band">Elastic Rubber Band (fa-bounce)</option>
-              <option value="float">Gentle Float ↕</option>
-              <option value="pulse">Smooth Pulse (fa-beat)</option>
-              <option value="heartbeat">Heartbeat Throb (fa-beat)</option>
-              <option value="sway">Pendulum Sway (fa-shake)</option>
-              <option value="wiggle">Sticker Wiggle (fa-shake)</option>
-              <option value="shimmer">Luminous Shimmer (fa-fade)</option>
-              <option value="glitch">Cyber Glitch (fa-shake)</option>
-              <option value="spin">Vinyl Spin 360° (fa-spin)</option>
-            </select>
-          </label>
-        </div>
-
-        {el.idleAnimation && el.idleAnimation !== 'none' && (
-          <div className="space-y-1.5 pt-1 border-t border-black/10">
-            <div className="flex items-center justify-between text-[10px]">
-              <span style={{ color: 'var(--text-muted)' }}>Toyhouse Free Class:</span>
-              <span className="font-mono text-emerald-500 font-semibold">
-                .{getFontAwesomeAnimClass(el.idleAnimation)}
-              </span>
-            </div>
-            <label className="block">
-              <span style={{ color: 'var(--text-muted)' }} className="block mb-0.5 text-[10px]">
-                Animation Duration: {el.animDuration || 2}s
-              </span>
-              <input
-                type="range"
-                min="0.5"
-                max="6"
-                step="0.25"
-                value={el.animDuration || 2}
-                onChange={(e) => updateSelected({ animDuration: parseFloat(e.target.value) })}
-                className="w-full accent-accent"
-              />
-            </label>
-          </div>
-        )}
-
-        {isToyhouseFree && el.hoverEffect !== 'none' && (
-          <div className="text-[9.5px] text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-[6px] px-2 py-1.5 leading-snug">
-            CSS <code>:hover</code> effects ({el.hoverEffect}) require{' '}
-            <strong>Toyhouse Premium / Carrd Pro</strong>. On Toyhouse Free (F2U), use{' '}
-            <strong>Hover Tooltip</strong> below or <strong>Collapsible (Click Expand)</strong> above.
-          </div>
-        )}
-
-        <label className="block">
-          <span style={{ color: 'var(--text-muted)' }} className="block mb-1 text-[10px]">
-            Hover Tooltip (HTML <code>title</code> — 100% F2U Safe)
-          </span>
-          <input
-            type="text"
-            placeholder="Optional text shown when hovering with cursor..."
-            value={el.tooltip || ''}
-            onChange={(e) => updateSelected({ tooltip: e.target.value })}
-            style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
-            className="w-full border rounded-[5px] px-2 py-1 text-[11px]"
-          />
-        </label>
-      </div>
+      </InspectorSubExpander>
     </div>
   );
 };
