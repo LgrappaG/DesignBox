@@ -276,6 +276,15 @@ export class MiniElement {
   querySelector(selector: string): MiniElement | null {
     return this.querySelectorAll(selector)[0] ?? null;
   }
+
+  contains(target: MiniElement | null): boolean {
+    let cur = target;
+    while (cur) {
+      if (cur === this) return true;
+      cur = cur.parentElement;
+    }
+    return false;
+  }
 }
 
 function splitTopLevelCommas(selector: string): string[] {
@@ -582,6 +591,18 @@ export class NodeDOMParser {
     return {
       body: body as unknown as HTMLElement,
       head: head as unknown as HTMLHeadElement,
+      getElementById: (id: string) => {
+        if (!id) return null;
+        const walk = (node: MiniElement): MiniElement | null => {
+          for (const ch of node.children) {
+            if (ch.id === id) return ch;
+            const nested = walk(ch);
+            if (nested) return nested;
+          }
+          return null;
+        };
+        return walk(body) as unknown as HTMLElement | null;
+      },
       querySelector: (sel: string) => body.querySelector(sel) as unknown as Element | null,
       querySelectorAll: (sel: string) => body.querySelectorAll(sel) as unknown as NodeListOf<Element>,
     } as unknown as Document;

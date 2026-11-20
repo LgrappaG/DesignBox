@@ -8,13 +8,31 @@ import {
   UiTheme,
 } from '../types/schema';
 
+let elementIdCounter = 0;
+
+export function createUniqueElementId(
+  prefix: string,
+  existingElements: ReadonlyArray<{ id: string }> = []
+): string {
+  const used = new Set(existingElements.map((e) => e.id));
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    elementIdCounter += 1;
+    const candidate = `${prefix}-${Date.now().toString(36)}-${elementIdCounter.toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
+  elementIdCounter += 1;
+  return `${prefix}-${Date.now()}-${elementIdCounter}`;
+}
+
 export function buildDefaultElement(
   type: ElementType,
   elements: DesignElement[],
   uiTheme: UiTheme,
   editingContainer: DesignElement | null
 ): DesignElement {
-  const id = `el-${Date.now().toString().slice(-4)}`;
+  const id = createUniqueElementId('el', elements);
   const maxRow = elements.reduce((m, e) => Math.max(m, e.rowIndex), 0);
   const isLight = uiTheme !== 'carbon';
   const cardBg = uiTheme === 'cute' ? '#FDF8FF' : isLight ? '#F2EFE9' : '#242220';
@@ -479,6 +497,10 @@ export function buildDefaultElement(
 
   const preset = defaults[type] || {};
   const radiusFallback = preset.borderRadius !== undefined ? preset.borderRadius : 8;
+  const collapseId =
+    type === 'pure_collapse'
+      ? preset.f2uCollapseId || `col-${id.replace(/[^a-zA-Z0-9_-]/g, '')}`
+      : preset.f2uCollapseId;
 
   return {
     ...preset,
@@ -488,16 +510,23 @@ export function buildDefaultElement(
     content: preset.content !== undefined ? preset.content : 'Content',
     subContent: preset.subContent,
     url: preset.url,
-    tabs: preset.tabs,
-    gallery: preset.gallery,
-    paletteColors: preset.paletteColors,
+    tabs: preset.tabs ? preset.tabs.map((t) => ({ ...t })) : undefined,
+    gallery: preset.gallery ? preset.gallery.map((g) => ({ ...g })) : undefined,
+    paletteColors: preset.paletteColors ? [...preset.paletteColors] : undefined,
     relationHearts: preset.relationHearts,
     stickerIcon: preset.stickerIcon,
-    inventoryItems: preset.inventoryItems,
-    timelineMilestones: preset.timelineMilestones,
-    relationNodes: preset.relationNodes,
+    inventoryItems: preset.inventoryItems
+      ? preset.inventoryItems.map((inv) => ({ ...inv }))
+      : undefined,
+    timelineMilestones: preset.timelineMilestones
+      ? preset.timelineMilestones.map((tm) => ({ ...tm }))
+      : undefined,
+    relationNodes: preset.relationNodes
+      ? preset.relationNodes.map((rn) => ({ ...rn }))
+      : undefined,
     googleFont: preset.googleFont,
     faIcon: preset.faIcon,
+    f2uCollapseId: collapseId,
     animDuration: preset.animDuration ?? 2,
     moodboardLayout: preset.moodboardLayout || '2x2',
     imageSlotHeight: preset.imageSlotHeight,
@@ -510,13 +539,22 @@ export function buildDefaultElement(
     collapseHeader: preset.collapseHeader,
     autoHeight: preset.autoHeight,
     customHtml: preset.customHtml,
-    customPropDefs: preset.customPropDefs,
-    customProps: preset.customProps,
+    customPropDefs: preset.customPropDefs
+      ? preset.customPropDefs.map((d) => ({ ...d }))
+      : undefined,
+    customProps: preset.customProps ? { ...preset.customProps } : undefined,
+    modifiers: preset.modifiers
+      ? preset.modifiers.map((m) =>
+          m.kind === 'split' && m.centerBadge
+            ? { ...m, centerBadge: { ...m.centerBadge } }
+            : { ...m }
+        )
+      : undefined,
     scrollable: preset.scrollable,
     imageShape: preset.imageShape || 'rect',
     rotation: preset.rotation || 0,
     zIndex: preset.zIndex || 10 + elements.length,
-    opacity: 100,
+    opacity: preset.opacity ?? 100,
     pinnedOverlay: preset.pinnedOverlay || false,
     bgPattern: preset.bgPattern || 'none',
     borderStyle: preset.borderStyle || 'solid',
@@ -577,7 +615,7 @@ export function buildBlueprintInstanceElement(
   elements: DesignElement[],
   uiTheme: UiTheme
 ): DesignElement {
-  const id = `cw-${Date.now().toString().slice(-4)}`;
+  const id = createUniqueElementId('cw', elements);
   const maxRow = elements.reduce((m, e) => Math.max(m, e.rowIndex), 0);
   const defaultPropsMap: Record<string, string> = {};
   (bp.customPropDefs || []).forEach((p) => {
@@ -596,7 +634,7 @@ export function buildBlueprintInstanceElement(
       'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=200&auto=format&fit=crop&q=80',
     customHtml: bp.htmlTemplate,
     customBlueprintId: bp.id,
-    customPropDefs: bp.customPropDefs ? [...bp.customPropDefs] : [],
+    customPropDefs: bp.customPropDefs ? bp.customPropDefs.map((d) => ({ ...d })) : [],
     customProps: defaultPropsMap,
     x: 40 + ((elements.length * 20) % 180),
     y: 40 + ((elements.length * 20) % 140),
@@ -633,7 +671,7 @@ export function buildElementFromAssetPreset(
   const base = buildDefaultElement(preset.type, elements, uiTheme, editingContainer);
   return {
     ...base,
-    id: `ast-${preset.id.replace(/^ast-/, '')}-${Date.now().toString().slice(-3)}`,
+    id: createUniqueElementId(`ast-${preset.id.replace(/^ast-/, '')}`, elements),
     label: preset.name,
     content: preset.content,
     url: preset.url ?? base.url,
@@ -665,7 +703,7 @@ export function buildElementFromFaIcon(
   );
   return {
     ...base,
-    id: `fa-${Date.now().toString().slice(-4)}`,
+    id: createUniqueElementId('fa', elements),
     label: mode === 'watermark' ? `FA Icon (${iconLabel})` : `${iconLabel} Badge`,
     faIcon: faClass,
     content: mode === 'watermark' ? faClass : iconLabel.toUpperCase(),

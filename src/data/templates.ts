@@ -955,11 +955,11 @@ export const TEMPLATE_PRESETS: TemplatePreset[] = [
   },
   {
     id: 'tpl-carrd',
-    name: 'Editorial Zine Portfolio (Carrd Pro)',
-    category: 'Carrd Pro Embed',
+    name: 'Editorial Zine Portfolio (Premium)',
+    category: 'Toyhouse Premium',
     description:
       'High-contrast brutalist/zine commission sheet with zero-JS radio tabs and clean typography.',
-    platform: 'carrd_pro',
+    platform: 'toyhouse_premium',
     canvasBg: '#141413',
     swatches: ['#141413', '#22211f', '#c84b31', '#e07a5f', '#3d405b', '#f4f1de'],
     elements: [

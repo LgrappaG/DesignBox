@@ -1004,7 +1004,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="space-y-4">
               <div className="space-y-2">
                 <p style={{ color: 'var(--text-muted)' }} className="leading-relaxed">
-                  Toyhouse and Carrd require external HTTPS image links. Add a free API key from{' '}
+                  Toyhouse requires external HTTPS image links. Add a free API key from{' '}
                   <span className="font-mono underline">api.imgbb.com</span> so DesignBox uploads
                   selected files automatically. Without a key, local files are embedded offline as
                   persistent Base64 DataURLs instead of temporary blobs.

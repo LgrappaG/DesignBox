@@ -194,7 +194,7 @@ export function applyThemeToElements(
   const targetSet = options.targetIds && options.targetIds.length > 0 ? new Set(options.targetIds) : null;
 
   return elements.map((el) => {
-    if (targetSet && !targetSet.has(el.id)) return el;
+    if ((targetSet && !targetSet.has(el.id)) || el.locked) return el;
 
     let next: DesignElement = { ...el };
 

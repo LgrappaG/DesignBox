@@ -16,6 +16,7 @@ import {
   openProjectDialogNative,
   readProjectFileNative,
   RecentProjectEntry,
+  registerDesktopCloseGuard,
   saveLocalSnapshotSafe,
   saveProjectAtPathNative,
   saveProjectDialogNative,
@@ -144,6 +145,56 @@ export function migrateProjectPayload(raw: unknown): ProjectFile {
 const ACTIVE_PROJECT_KEY = 'dbx_active_project';
 const MAX_HISTORY_ENTRIES = 60;
 
+export interface HistoryCoalesceState {
+  key: string;
+  at: number;
+  historyIdx: number;
+}
+
+/** Pushes a snapshot onto undo history, coalescing rapid edits sharing `key` within `windowMs`. */
+export function applyCoalescedHistoryPush(
+  history: ReadonlyArray<DesignElement[]>,
+  historyIdx: number,
+  next: DesignElement[],
+  coalesceState: HistoryCoalesceState | null,
+  key: string,
+  nowMs: number,
+  windowMs: number,
+  maxEntries = MAX_HISTORY_ENTRIES
+): {
+  history: DesignElement[][];
+  historyIdx: number;
+  coalesceState: HistoryCoalesceState;
+} {
+  if (
+    coalesceState &&
+    coalesceState.key === key &&
+    coalesceState.historyIdx === historyIdx &&
+    historyIdx > 0 &&
+    nowMs - coalesceState.at <= windowMs &&
+    history[historyIdx] !== undefined
+  ) {
+    const updated = [...history];
+    updated[historyIdx] = next;
+    return {
+      history: updated,
+      historyIdx,
+      coalesceState: { key, at: nowMs, historyIdx },
+    };
+  }
+  const sliced = history.slice(0, historyIdx + 1);
+  let updated = [...sliced, next];
+  if (updated.length > maxEntries) {
+    updated = updated.slice(updated.length - maxEntries);
+  }
+  const nextIdx = updated.length - 1;
+  return {
+    history: updated,
+    historyIdx: nextIdx,
+    coalesceState: { key, at: nowMs, historyIdx: nextIdx },
+  };
+}
+
 export interface InitialProjectBootstrap {
   elements: DesignElement[];
   name: string;
@@ -222,6 +273,7 @@ export function useProjectHistory({
   const elementsRef = useRef<DesignElement[]>(initialElements);
   const historyRef = useRef<DesignElement[][]>([initialElements]);
   const historyIdxRef = useRef<number>(0);
+  const lastCoalesceRef = useRef<HistoryCoalesceState | null>(null);
 
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
@@ -229,6 +281,7 @@ export function useProjectHistory({
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
   const [projectName, setProjectName] = useState<string>(initialProjectName);
   const [isDirty, setIsDirty] = useState<boolean>(false);
+  const [autosaveSuspended, setAutosaveSuspended] = useState<boolean>(false);
   const [recentProjects, setRecentProjects] = useState<RecentProjectEntry[]>([]);
   const [localSnapshots, setLocalSnapshots] = useState<SnapshotEntry[]>([]);
   const [lastSnapshotAt, setLastSnapshotAt] = useState<number | null>(null);
@@ -275,6 +328,7 @@ export function useProjectHistory({
   );
 
   const commitElements = useCallback((next: DesignElement[]) => {
+    lastCoalesceRef.current = null;
     const sliced = historyRef.current.slice(0, historyIdxRef.current + 1);
     let updatedHistory = [...sliced, next];
     if (updatedHistory.length > MAX_HISTORY_ENTRIES) {
@@ -300,14 +354,43 @@ export function useProjectHistory({
     [commitElements]
   );
 
+  const commitCoalesced = useCallback(
+    (
+      updater: (prev: DesignElement[]) => DesignElement[],
+      coalesceKey: string,
+      windowMs = 450
+    ) => {
+      const next = updater(elementsRef.current);
+      if (next === elementsRef.current) return;
+      const pushed = applyCoalescedHistoryPush(
+        historyRef.current,
+        historyIdxRef.current,
+        next,
+        lastCoalesceRef.current,
+        coalesceKey,
+        Date.now(),
+        windowMs
+      );
+      lastCoalesceRef.current = pushed.coalesceState;
+      historyRef.current = pushed.history;
+      historyIdxRef.current = pushed.historyIdx;
+      elementsRef.current = next;
+      setHistory(pushed.history);
+      setHistoryIdx(pushed.historyIdx);
+      setElementsState(next);
+      setIsDirty(true);
+    },
+    []
+  );
+
   const replaceElementsTransient = useCallback(
     (nextOrUpdater: DesignElement[] | ((prev: DesignElement[]) => DesignElement[])) => {
-      setElementsState((prev) => {
-        const next =
-          typeof nextOrUpdater === 'function' ? nextOrUpdater(prev) : nextOrUpdater;
-        elementsRef.current = next;
-        return next;
-      });
+      const next =
+        typeof nextOrUpdater === 'function'
+          ? nextOrUpdater(elementsRef.current)
+          : nextOrUpdater;
+      elementsRef.current = next;
+      setElementsState(next);
     },
     []
   );
@@ -317,6 +400,7 @@ export function useProjectHistory({
   }, [commitElements]);
 
   const resetHistory = useCallback((next: DesignElement[]) => {
+    lastCoalesceRef.current = null;
     const fresh = [next];
     historyRef.current = fresh;
     historyIdxRef.current = 0;
@@ -327,6 +411,7 @@ export function useProjectHistory({
   }, []);
 
   const undo = useCallback(() => {
+    lastCoalesceRef.current = null;
     if (historyIdxRef.current > 0) {
       const targetIdx = historyIdxRef.current - 1;
       const targetElements = historyRef.current[targetIdx];
@@ -339,6 +424,7 @@ export function useProjectHistory({
   }, []);
 
   const redo = useCallback(() => {
+    lastCoalesceRef.current = null;
     if (historyIdxRef.current < historyRef.current.length - 1) {
       const targetIdx = historyIdxRef.current + 1;
       const targetElements = historyRef.current[targetIdx];
@@ -380,7 +466,13 @@ export function useProjectHistory({
   }, [flashSaveNotice]);
 
   useEffect(() => {
-    const onBeforeUnload = () => flushPendingAutosave();
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      flushPendingAutosave();
+      if (isDirtyRef.current && elementsRef.current.length > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => {
       window.removeEventListener('beforeunload', onBeforeUnload);
@@ -388,7 +480,26 @@ export function useProjectHistory({
     };
   }, [flushPendingAutosave]);
 
-  // Debounced auto-save active project to localStorage (avoids blocking drag frames)
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | null = null;
+    void registerDesktopCloseGuard(
+      () => isDirtyRef.current && elementsRef.current.length > 0,
+      flushPendingAutosave
+    ).then((fn) => {
+      if (active) {
+        unlisten = fn;
+      } else {
+        fn();
+      }
+    });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, [flushPendingAutosave]);
+
+  // Debounced auto-save active project to localStorage (paused during active drags)
   useEffect(() => {
     const payload: ProjectFile = {
       version: PROJECT_FILE_VERSION,
@@ -405,9 +516,13 @@ export function useProjectHistory({
       customBlueprints: projectMeta.customBlueprints,
     };
     pendingAutosaveRef.current = payload;
+    if (autosaveSuspended) {
+      return;
+    }
     const timer = window.setTimeout(flushPendingAutosave, 400);
     return () => window.clearTimeout(timer);
   }, [
+    autosaveSuspended,
     elements,
     projectName,
     projectMeta.platform,
@@ -541,11 +656,17 @@ export function useProjectHistory({
     await handleSaveProjectAs();
   }, [buildProjectPayload, currentFilePath, flashSaveNotice, handleSaveProjectAs, refreshDesktopLists]);
 
+  const confirmDiscardIfDirty = useCallback((actionLabel: string): boolean => {
+    if (!isDirtyRef.current || elementsRef.current.length === 0) return true;
+    return window.confirm(`You have unsaved changes. Discard them and ${actionLabel}?`);
+  }, []);
+
   const handleOpenProjectNative = useCallback(async (): Promise<boolean> => {
     if (!isTauriRuntime()) return false;
     try {
       const opened = await openProjectDialogNative();
       if (!opened) return true; // Cancelled dialog cleanly
+      if (!confirmDiscardIfDirty('open this project')) return true;
       if (elementsRef.current.length > 0 && isDirtyRef.current) {
         const currentPayload = buildProjectPayload();
         await saveLocalSnapshotSafe(
@@ -566,7 +687,7 @@ export function useProjectHistory({
       );
       return true;
     }
-  }, [applyOpenedProject, buildProjectPayload, flashSaveNotice, refreshDesktopLists]);
+  }, [applyOpenedProject, buildProjectPayload, confirmDiscardIfDirty, flashSaveNotice, refreshDesktopLists]);
 
   const handleOpenProjectFromFileInput = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -591,6 +712,7 @@ export function useProjectHistory({
   const handleOpenRecentProject = useCallback(
     async (path: string) => {
       try {
+        if (!confirmDiscardIfDirty('open this recent project')) return;
         if (elementsRef.current.length > 0 && isDirtyRef.current) {
           const currentPayload = buildProjectPayload();
           await saveLocalSnapshotSafe(
@@ -611,7 +733,7 @@ export function useProjectHistory({
         );
       }
     },
-    [applyOpenedProject, buildProjectPayload, flashSaveNotice, refreshDesktopLists]
+    [applyOpenedProject, buildProjectPayload, confirmDiscardIfDirty, flashSaveNotice, refreshDesktopLists]
   );
 
   const createManualSnapshot = useCallback(async () => {
@@ -632,6 +754,7 @@ export function useProjectHistory({
   const restoreLocalSnapshot = useCallback(
     async (snapshotId: string) => {
       try {
+        if (!confirmDiscardIfDirty('restore this recovery snapshot')) return;
         const raw = await loadLocalSnapshotSafe(snapshotId);
         const parsed = migrateProjectPayload(JSON.parse(raw));
         applyOpenedProject(parsed, currentFilePath, parsed.name);
@@ -640,7 +763,7 @@ export function useProjectHistory({
         alert(err instanceof Error ? err.message : 'Failed to restore recovery snapshot.');
       }
     },
-    [applyOpenedProject, currentFilePath, flashSaveNotice]
+    [applyOpenedProject, confirmDiscardIfDirty, currentFilePath, flashSaveNotice]
   );
 
   const markSavedClean = useCallback((nextName?: string) => {
@@ -697,11 +820,14 @@ export function useProjectHistory({
     canRedo: historyIdx < history.length - 1,
     commitElements,
     commitWithUpdater,
+    commitCoalesced,
     replaceElementsTransient,
     commitLatestElements,
     resetHistory,
     undo,
     redo,
+    setAutosaveSuspended,
+    confirmDiscardIfDirty,
     saveNotice,
     flashSaveNotice,
     currentFilePath,

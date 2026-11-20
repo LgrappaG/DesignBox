@@ -21,9 +21,14 @@ import {
   escapeCssUrl,
   escapeHtmlAttr,
   isF2USafeShape,
+  isToyhouseFreePlatform,
   maskElementForF2USimulation,
   sanitizeF2UBodyHtml,
   sanitizeHrefUrl,
+  sanitizeInlineCssForF2U,
+  sanitizeInlineCssForPro,
+  sanitizeRichHtmlForPro,
+  stripStyleTagsFromHtml,
 } from './f2uShield';
 import {
   buildF2UAngledLineCss,
@@ -138,6 +143,19 @@ export function getElementEffectiveLinkUrl(el: DesignElement): string | null {
   return raw && raw !== '#' ? raw : null;
 }
 
+function stripAnchorTags(html: string): string {
+  return html.replace(/<\/?a\b[^>]*>/gi, '');
+}
+
+function sanitizeClassListStr(raw?: string): string {
+  return (raw || '').replace(/[^a-zA-Z0-9_\s-]/g, '').trim();
+}
+
+function sanitizeCssToken(raw?: string, fallback = ''): string {
+  const cleaned = (raw || '').replace(/["'<>;\r\n]/g, '').trim();
+  return cleaned || fallback;
+}
+
 function sanitizeElementTextForExport(el: DesignElement, isToyhouseFree: boolean): DesignElement {
   return {
     ...el,
@@ -145,11 +163,19 @@ function sanitizeElementTextForExport(el: DesignElement, isToyhouseFree: boolean
     subContent: el.subContent !== undefined ? sanitizeF2UBodyHtml(el.subContent) : undefined,
     collapseHeader:
       el.collapseHeader !== undefined ? sanitizeF2UBodyHtml(el.collapseHeader) : undefined,
+    stickerIcon: el.stickerIcon !== undefined ? sanitizeF2UBodyHtml(el.stickerIcon) : undefined,
+    tableHeaders: el.tableHeaders !== undefined ? sanitizeF2UBodyHtml(el.tableHeaders) : undefined,
+    customHtml:
+      el.customHtml !== undefined
+        ? isToyhouseFree
+          ? stripStyleTagsFromHtml(sanitizeRichHtmlForPro(el.customHtml))
+          : sanitizeRichHtmlForPro(el.customHtml)
+        : undefined,
     rawInnerHtml:
       el.rawInnerHtml !== undefined
         ? isToyhouseFree
           ? sanitizeF2UBodyHtml(el.rawInnerHtml)
-          : el.rawInnerHtml.replace(/<(script|iframe|object|embed)\b[^>]*>[\s\S]*?<\/\1>/gi, '').replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+          : sanitizeRichHtmlForPro(el.rawInnerHtml)
         : undefined,
     tabs: el.tabs?.map((t) => ({
       ...t,
@@ -159,6 +185,17 @@ function sanitizeElementTextForExport(el: DesignElement, isToyhouseFree: boolean
     gallery: el.gallery?.map((g) => ({
       ...g,
       caption: g.caption !== undefined ? sanitizeF2UBodyHtml(g.caption) : undefined,
+    })),
+    inventoryItems: el.inventoryItems?.map((item) => ({
+      ...item,
+      name: sanitizeF2UBodyHtml(item.name),
+      icon: item.icon !== undefined ? sanitizeF2UBodyHtml(item.icon) : undefined,
+    })),
+    timelineMilestones: el.timelineMilestones?.map((m) => ({
+      ...m,
+      year: sanitizeF2UBodyHtml(m.year),
+      title: sanitizeF2UBodyHtml(m.title),
+      description: sanitizeF2UBodyHtml(m.description),
     })),
     relationNodes: el.relationNodes?.map((n) => ({
       ...n,
@@ -198,7 +235,8 @@ function renderLightboxMarkup(params: {
       ? 'width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: zoom-in; text-decoration: none; color: inherit;'
       : 'display: block; width: 100%; cursor: zoom-in; text-decoration: none; color: inherit;';
     const blurCss = isToyhouseFree ? '' : ' backdrop-filter: blur(5px);';
-    return `<a href="#${safeId}" data-toggle="collapse" role="button" aria-expanded="false" aria-controls="${safeId}" style="${triggerStyle}">${triggerHtml}</a><div id="${safeId}" class="collapse" style="position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 999999;"><a href="#${safeId}" data-toggle="collapse" role="button" aria-label="Close Lightbox" style="width: 100%; height: 100%; background: rgba(14,13,12,0.92);${blurCss} display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; cursor: zoom-out; text-decoration: none; color: inherit;"><img src="${safeImgSrc}" alt="${safeAlt}" style="max-width: 90vw; max-height: 84vh; object-fit: contain; border-radius: 8px; box-shadow: 0 16px 48px rgba(0,0,0,0.7);" />${captionHtml ? `<div style="color: #fff; margin-top: 10px; font-size: 13px; font-weight: 600;">${captionHtml}</div>` : ''}<div style="color: rgba(255,255,255,0.75); font-size: 11px; margin-top: 6px; padding: 3px 10px; border-radius: 999px; background: rgba(255,255,255,0.12);">Click anywhere to dismiss</div></a></div>`;
+    const safeCaptionHtml = captionHtml ? stripAnchorTags(captionHtml) : '';
+    return `<a href="#${safeId}" data-toggle="collapse" role="button" aria-expanded="false" aria-controls="${safeId}" style="${triggerStyle}">${triggerHtml}</a><div id="${safeId}" class="collapse" style="position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 999999;"><a href="#${safeId}" data-toggle="collapse" role="button" aria-label="Close Lightbox" style="width: 100%; height: 100%; background: rgba(14,13,12,0.92);${blurCss} display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; cursor: zoom-out; text-decoration: none; color: inherit;"><img src="${safeImgSrc}" alt="${safeAlt}" style="max-width: 90vw; max-height: 84vh; object-fit: contain; border-radius: 8px; box-shadow: 0 16px 48px rgba(0,0,0,0.7);" />${safeCaptionHtml ? `<div style="color: #fff; margin-top: 10px; font-size: 13px; font-weight: 600;">${safeCaptionHtml}</div>` : ''}<div style="color: rgba(255,255,255,0.75); font-size: 11px; margin-top: 6px; padding: 3px 10px; border-radius: 999px; background: rgba(255,255,255,0.12);">Click anywhere to dismiss</div></a></div>`;
   }
 
   const summaryStyle = fillBox
@@ -569,12 +607,14 @@ function renderTabsHTML(
           { id: 't2', title: '02. Details', content: 'Details tab content.' },
         ];
 
+  const safeTabId = el.id.replace(/[^a-zA-Z0-9_-]/g, '') || 'tabs';
+
   if (isToyhouseFree || el.type === 'pure_f2u_tabs') {
-    const safePrefix = `dbx-tab-${el.id.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+    const safePrefix = `dbx-tab-${safeTabId}`;
     const navItems = tabs
       .map(
         (t, idx) =>
-          `        <li class="nav-item"><a class="nav-link${idx === 0 ? ' active' : ''}" data-toggle="tab" href="#${safePrefix}-${idx}" style="color: ${el.textColor}; border-color: ${el.borderColor};">${t.title}</a></li>`
+          `        <li class="nav-item"><a class="nav-link${idx === 0 ? ' active' : ''}" data-toggle="tab" href="#${safePrefix}-${idx}" style="color: ${el.textColor}; border-color: ${el.borderColor};">${stripAnchorTags(t.title)}</a></li>`
       )
       .join('\n');
     const tabPanes = tabs
@@ -584,7 +624,7 @@ function renderTabsHTML(
       )
       .join('\n');
 
-    return `<div id="${el.id}-wrap" class="${classes}" style="${baseStyle}">
+    return `<div id="${safeTabId}-wrap" class="${classes}" style="${baseStyle}">
       ${el.content ? `<div style="font-weight: 700; margin-bottom: 8px; font-size: ${el.fontSize + 1}px;">${el.content}</div>` : ''}
       <ul class="nav nav-tabs" style="border-bottom-color: ${el.borderColor};">
 ${navItems}
@@ -596,7 +636,7 @@ ${tabPanes}
   }
 
   // Pure CSS Radio Tabs for Toyhouse Premium / Carrd Pro
-  const groupName = `dbx-tab-grp-${el.id}`;
+  const groupName = `dbx-tab-grp-${safeTabId}`;
   const radiosAndLabels = tabs
     .map(
       (t, idx) =>
@@ -613,11 +653,11 @@ ${tabPanes}
     .join('\n');
 
   const scopedTabCss = `<style>
-      #${el.id}-wrap .dbx-tab-panel { display: none; }
-      ${tabs.map((_, idx) => `#${groupName}-${idx}:checked ~ .dbx-panels .dbx-panel-${idx} { display: block; } #${groupName}-${idx}:checked + label { background: ${el.borderColor}; color: #fff; }`).join('\n      ')}
+      #${safeTabId}-wrap .dbx-tab-panel { display: none; }
+      ${tabs.map((_, idx) => `#${groupName}-${idx}:checked ~ .dbx-panels .dbx-panel-${idx} { display: block; } #${groupName}-${idx}:checked + label { background: ${sanitizeCssToken(el.borderColor, '#C86D51')}; color: #fff; }`).join('\n      ')}
     </style>`;
 
-  return `<div id="${el.id}-wrap" class="${classes}" style="${baseStyle}">
+  return `<div id="${safeTabId}-wrap" class="${classes}" style="${baseStyle}">
       ${scopedTabCss}
       <div style="font-weight: 700; margin-bottom: 8px; font-size: ${el.fontSize + 1}px;">${el.content}</div>
 ${radiosAndLabels}
@@ -790,6 +830,15 @@ export function renderInnerElementHTML(
   isToyhouseFree = false
 ): string {
   if (rawEl.hidden) return '';
+  if (rawEl.type === 'pure_image_slot' && rawEl.url && rawEl.url.trim()) {
+    return renderInnerElementHTML(
+      { ...rawEl, type: 'image' },
+      isToyhouse,
+      allElements,
+      isFreeformFixed,
+      isToyhouseFree
+    );
+  }
   const maskedEl = isToyhouseFree ? maskElementForF2USimulation(rawEl) : rawEl;
   const el = sanitizeElementTextForExport(maskedEl, isToyhouseFree);
   const children = allElements.filter((c) => c.parentId === el.id && !c.hidden);
@@ -847,7 +896,12 @@ export function renderInnerElementHTML(
   const cursorCss = el.cursorStyle && el.cursorStyle !== 'auto' ? `cursor: ${el.cursorStyle}` : '';
   const pointerEventsCss = el.pointerEvents === 'none' ? 'pointer-events: none' : '';
   const userSelectCss = el.userSelect && el.userSelect !== 'auto' ? `user-select: ${el.userSelect}` : '';
-  const rawInlineCss = el.customInlineStyle ? el.customInlineStyle.trim().replace(/;+$/, '') : '';
+  const rawInlineCss = isToyhouseFree
+    ? sanitizeInlineCssForF2U(el.customInlineStyle).cleanCss
+    : sanitizeInlineCssForPro(el.customInlineStyle);
+  const safeGoogleFont = el.googleFont
+    ? el.googleFont.replace(/[^a-zA-Z0-9\s-]/g, '').trim()
+    : '';
   const enabledMods = (el.modifiers || []).filter((m) => m.enabled);
   const activeSplit = enabledMods.find((m): m is SplitModifier => m.kind === 'split');
   const usesF2UPunch = canUseF2UBackgroundPunch(el);
@@ -1057,7 +1111,7 @@ export function renderInnerElementHTML(
     effectivePaddingCss,
     geoBorderShell ? '' : marginCss,
     `font-size: ${el.fontSize}px`,
-    `font-family: ${el.googleFont ? `'${el.googleFont}', ` : ''}${getFontFamilyCSS(el.fontFamily)}`,
+    `font-family: ${safeGoogleFont ? `'${safeGoogleFont}', ` : ''}${getFontFamilyCSS(el.fontFamily)}`,
     `font-weight: ${el.fontWeight === 'bold' ? '700' : el.fontWeight === 'medium' ? '500' : '400'}`,
     `text-align: ${el.textAlign}`,
     el.lineHeight ? `line-height: ${el.lineHeight}` : 'line-height: 1.45',
@@ -1106,8 +1160,8 @@ export function renderInnerElementHTML(
     !isToyhouseFree && el.idleAnimation && el.idleAnimation !== 'none'
       ? `dbx-anim-${el.idleAnimation}`
       : '',
-    el.bsClasses ? el.bsClasses.trim() : '',
-    !isToyhouseFree && el.customCssClass ? el.customCssClass.trim() : '',
+    sanitizeClassListStr(el.bsClasses),
+    !isToyhouseFree ? sanitizeClassListStr(el.customCssClass) : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -1163,7 +1217,7 @@ export function renderInnerElementHTML(
     if (maskCss && maskRingOverlaysHtml) {
       out = `<div style="position: relative; width: 100%; height: ${el.autoHeight ? 'auto' : '100%'};">\n${out}\n${maskRingOverlaysHtml}\n</div>`;
     }
-    if (faRotateClass && faAnimClass && el.type !== 'pagedoll') {
+    if (faRotateClass && faAnimClass && el.type !== 'pagedoll' && el.type !== 'fa_watermark') {
       out = `<div class="${faRotateClass}" style="width: 100%; height: 100%; position: relative;">\n${out}\n</div>`;
     }
     const tip = el.tooltip?.trim();
@@ -1180,7 +1234,10 @@ export function renderInnerElementHTML(
       out = `<div class="collapse${el.f2uCollapseDefaultOpen ? ' show' : ''}" id="${cid}">\n${out}\n</div>`;
     } else if (el.f2uCollapseRole === 'trigger' && el.f2uCollapseId?.trim()) {
       const cid = escapeHtmlAttr(el.f2uCollapseId.trim().replace(/^#/, ''));
-      out = `<a data-toggle="collapse" href="#${cid}" role="button" aria-expanded="${el.f2uCollapseDefaultOpen ? 'true' : 'false'}" style="text-decoration: none; color: inherit; display: block; height: 100%;">\n${out}\n</a>`;
+      const hasInnerInteractive = /(?:<a\b|<details\b)/i.test(out);
+      out = hasInnerInteractive
+        ? `<div data-toggle="collapse" data-target="#${cid}" role="button" aria-expanded="${el.f2uCollapseDefaultOpen ? 'true' : 'false'}" style="cursor: pointer; display: block; height: 100%;">\n${out}\n</div>`
+        : `<a data-toggle="collapse" href="#${cid}" role="button" aria-expanded="${el.f2uCollapseDefaultOpen ? 'true' : 'false'}" style="text-decoration: none; color: inherit; display: block; height: 100%;">\n${out}\n</a>`;
     }
     return out;
   };
@@ -1201,10 +1258,14 @@ export function renderInnerElementHTML(
     containerCss = `margin-top: 10px; display: flex; flex-direction: row; flex-wrap: ${cWrap ? 'wrap' : 'nowrap'}; gap: ${cGap}px; align-items: ${cAlign}; justify-content: ${cJustify}; width: 100%;`;
   } else if (cLayout === 'grid_2') {
     containerClass = 'row no-gutters dbx-bs-row dbx-bs-cols-2';
-    containerCss = `margin-top: 10px; margin-left: -${halfGap}px; margin-right: -${halfGap}px; width: calc(100% + ${cGap}px);`;
+    containerCss = isToyhouseFree
+      ? `margin-top: 10px; margin-left: -${halfGap}px; margin-right: -${halfGap}px; width: auto;`
+      : `margin-top: 10px; margin-left: -${halfGap}px; margin-right: -${halfGap}px; width: calc(100% + ${cGap}px);`;
   } else if (cLayout === 'grid_3') {
     containerClass = 'row no-gutters dbx-bs-row dbx-bs-cols-3';
-    containerCss = `margin-top: 10px; margin-left: -${halfGap}px; margin-right: -${halfGap}px; width: calc(100% + ${cGap}px);`;
+    containerCss = isToyhouseFree
+      ? `margin-top: 10px; margin-left: -${halfGap}px; margin-right: -${halfGap}px; width: auto;`
+      : `margin-top: 10px; margin-left: -${halfGap}px; margin-right: -${halfGap}px; width: calc(100% + ${cGap}px);`;
   } else if (cLayout === 'freeform_offset') {
     containerCss = `position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; overflow: hidden; pointer-events: none; z-index: 4;`;
   }
@@ -1238,7 +1299,9 @@ export function renderInnerElementHTML(
               } else if (widthMode === 'full') {
                 childWrapperStyle = `width: 100%; flex: 1 1 100%; min-width: 0;${imageHeightGuard}`;
               } else if (widthMode === 'half') {
-                childWrapperStyle = `width: calc(50% - ${cGap / 2}px); flex: 1 1 calc(50% - ${cGap / 2}px); min-width: 120px;${imageHeightGuard}`;
+                childWrapperStyle = isToyhouseFree
+                  ? `width: 48%; flex: 1 1 48%; min-width: 120px;${imageHeightGuard}`
+                  : `width: calc(50% - ${cGap / 2}px); flex: 1 1 calc(50% - ${cGap / 2}px); min-width: 120px;${imageHeightGuard}`;
               } else if (widthMode === 'custom') {
                 childWrapperStyle = `width: ${child.childCustomWidth || child.width}px; flex-shrink: 0;${imageHeightGuard}`;
               } else {
@@ -1266,6 +1329,20 @@ export function renderInnerElementHTML(
       return renderGalleryHTML(el, baseStyle, classes, isToyhouse, isToyhouseFree);
 
     case 'split_box': {
+      if (activeSplit) {
+        const splitBody = renderSplitModifierHTML(
+          el,
+          activeSplit,
+          children,
+          allElements,
+          isToyhouse,
+          isToyhouseFree,
+          renderInnerElementHTML,
+          escapeHtmlAttr,
+          sanitizeF2UBodyHtml
+        );
+        return `<div class="${classes}" style="${baseStyle}">${usesF2UPunch ? `<div style="position: relative; z-index: 2; flex: 1; display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0;">${splitBody}</div>` : splitBody}</div>`;
+      }
       const parts = (el.subContent || 'Left column content... || Right column content...').split('||');
       return `<div class="${classes}" style="${baseStyle}">
       <div style="font-weight: 700; margin-bottom: 8px; border-bottom: 1px solid ${el.borderColor}; padding-bottom: 4px;">${el.content}</div>
@@ -1334,7 +1411,7 @@ export function renderInnerElementHTML(
           <span>SIDE A // MIXTAPE</span>
           <span>90 MIN</span>
         </div>
-        <div style="display: flex; justify-content: space-around; align-items: center; py: 4px; background: rgba(0,0,0,0.35); border-radius: 999px; padding: 6px 14px;">
+        <div style="display: flex; justify-content: space-around; align-items: center; background: rgba(0,0,0,0.35); border-radius: 999px; padding: 6px 14px;">
           <div class="${isToyhouse ? 'fa-spin' : 'dbx-anim-spin'}" style="width: 24px; height: 24px; border-radius: 50%; border: 3px dashed ${el.borderColor};"></div>
           <div style="font-size: 11px; font-weight: 700;">${el.content}</div>
           <div class="${isToyhouse ? 'fa-spin' : 'dbx-anim-spin'}" style="width: 24px; height: 24px; border-radius: 50%; border: 3px dashed ${el.borderColor};"></div>
@@ -1358,7 +1435,7 @@ export function renderInnerElementHTML(
         ${links
           .map((item) => {
             const [label, href] = item.split('|');
-            return `<a href="${sanitizeHrefUrl(href, '#')}" target="_blank" rel="noopener noreferrer" style="${pillMargin}padding: 5px 12px; border-radius: 999px; background: ${el.borderColor}; color: #fff; text-decoration: none; font-size: 11px; font-weight: 700;">${sanitizeF2UBodyHtml((label || 'Link').trim())} ↗</a>`;
+            return `<a href="${sanitizeHrefUrl(href, '#')}" target="_blank" rel="noopener noreferrer" style="${pillMargin}padding: 5px 12px; border-radius: 999px; background: ${el.borderColor}; color: #fff; text-decoration: none; font-size: 11px; font-weight: 700;">${stripAnchorTags(sanitizeF2UBodyHtml((label || 'Link').trim()))} ↗</a>`;
           })
           .join('')}
       </div>
@@ -1372,7 +1449,7 @@ export function renderInnerElementHTML(
     }
 
     case 'lace_divider': {
-      const dividerFontCss = `font-family: ${el.googleFont ? `'${el.googleFont}', ` : ''}${getFontFamilyCSS(el.fontFamily)};`;
+      const dividerFontCss = `font-family: ${safeGoogleFont ? `'${safeGoogleFont}', ` : ''}${getFontFamilyCSS(el.fontFamily)};`;
       return `<div class="${classes}" style="width: 100%; height: 100%; box-sizing: border-box; display: flex; align-items: center; justify-content: center; padding: ${el.padding}px 0; text-align: center; color: ${el.borderColor}; font-size: ${el.fontSize}px; ${dividerFontCss} letter-spacing: 6px; user-select: none; ${rotationCss}; ${opacityCss};">
       <span>${el.content || '─── ･ ｡ﾟ☆: *.☽ .* :☆ﾟ. ───'}</span>
     </div>`;
@@ -1382,7 +1459,7 @@ export function renderInnerElementHTML(
       return `<div class="${classes}" style="height: 100%; display: flex; flex-direction: column; ${rotationCss}; ${opacityCss};">
       <div style="display: inline-block; width: fit-content; padding: 4px 14px; background: ${el.borderColor}; color: #fff; border-radius: 6px 6px 0 0; font-size: 10px; font-weight: 700; letter-spacing: 0.06em;">📁 ${el.content}</div>
       <div style="${baseStyle}; position: relative; top: auto; right: auto; bottom: auto; left: auto; transform: none; opacity: 1; border-top-left-radius: 0; flex: 1;">
-        <div style="font-size: ${el.fontSize}px; opacity: 0.9; white-space: pre-line;">${el.subContent || 'Folder contents and archival records.'}</div>
+        <div style="font-size: ${el.fontSize}px; opacity: 0.9; white-space: pre-line;">${el.subContent || 'Folder contents and archival records.'}</div>${nestedChildrenHTML}
       </div>
     </div>`;
     }
@@ -1399,7 +1476,7 @@ export function renderInnerElementHTML(
 
     case 'music_player': {
       return `<div class="${classes}" style="${baseStyle}; flex-direction: row; align-items: center; gap: 12px;">
-      <div class="dbx-anim-spin" style="width: 42px; height: 42px; border-radius: 999px; background: radial-gradient(circle, ${el.borderColor} 22%, #111 25%, #222 60%, #090909 100%); border: 2px solid ${el.borderColor}; flex-shrink: 0;"></div>
+      <div class="${isToyhouse ? 'fa-spin' : 'dbx-anim-spin'}" style="width: 42px; height: 42px; border-radius: 999px; background: radial-gradient(circle, ${el.borderColor} 22%, #111 25%, #222 60%, #090909 100%); border: 2px solid ${el.borderColor}; flex-shrink: 0;"></div>
       <div style="flex: 1; min-width: 0; text-align: left;">
         <div style="font-weight: 700; font-size: ${el.fontSize}px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">♫ ${el.content}</div>
         <div style="font-size: ${Math.max(10, el.fontSize - 2)}px; opacity: 0.75;">${el.subContent || 'Character Theme Track'}</div>
@@ -1431,7 +1508,7 @@ export function renderInnerElementHTML(
       const swatchesHtml = cols
         .map(
           (hex) =>
-            `<div style="flex: 1; height: 34px; background: ${hex}; border-radius: 4px; border: 1px solid rgba(255,255,255,0.18);" title="${hex}"></div>`
+            `<div style="flex: 1; height: 34px; background: ${sanitizeCssToken(hex, '#2C2A28')}; border-radius: 4px; border: 1px solid rgba(255,255,255,0.18);" title="${escapeHtmlAttr(hex)}"></div>`
         )
         .join('');
       return `<div class="${classes}" style="${baseStyle}">
@@ -1441,10 +1518,12 @@ export function renderInnerElementHTML(
     }
 
     case 'accordion': {
-      return `<details class="${classes}" style="${baseStyle}; cursor: pointer;">
-      <summary style="font-weight: 700; outline: none;">${el.content}</summary>
-      <div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed ${el.borderColor}; font-size: ${Math.max(11, el.fontSize - 1)}px; white-space: pre-line; opacity: 0.88;">${el.subContent || 'Hidden spoiler or extended lore notes.'}</div>
-    </details>`;
+      return `<div class="${classes}" style="${baseStyle}">
+      <details${el.collapseDefaultOpen ? ' open' : ''} style="width: 100%; cursor: pointer;">
+        <summary style="font-weight: 700; outline: none;">${el.content}</summary>
+        <div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed ${el.borderColor}; font-size: ${Math.max(11, el.fontSize - 1)}px; white-space: pre-line; opacity: 0.88;">${el.subContent || 'Hidden spoiler or extended lore notes.'}</div>
+      </details>
+    </div>`;
     }
 
     case 'sticker': {
@@ -1473,9 +1552,9 @@ export function renderInnerElementHTML(
         .replace(/\{\{subtitle\}\}/g, () => el.subContent || '')
         .replace(/\{\{image\}\}/g, () => safeCustomImg)
         .replace(/\{\{link\}\}/g, () => safeCustomLink)
-        .replace(/\{\{accent\}\}/g, () => el.borderColor || '#C86D51')
-        .replace(/\{\{text\}\}/g, () => el.textColor || '#2C2A28')
-        .replace(/\{\{bg\}\}/g, () => el.bgColor || '#F7F5F0');
+        .replace(/\{\{accent\}\}/g, () => sanitizeCssToken(el.borderColor, '#C86D51'))
+        .replace(/\{\{text\}\}/g, () => sanitizeCssToken(el.textColor, '#2C2A28'))
+        .replace(/\{\{bg\}\}/g, () => sanitizeCssToken(el.bgColor, '#F7F5F0'));
 
       // Interpolate any user-defined Custom Props (e.g. {{level}}, {{rank}}, {{badge}}) literally
       if (el.customProps) {
@@ -1485,6 +1564,10 @@ export function renderInnerElementHTML(
           interpolated = interpolated.replace(new RegExp(`\\{\\{${escapedKey}\\}\\}`, 'g'), () => safePropVal);
         }
       }
+
+      interpolated = isToyhouseFree
+        ? stripStyleTagsFromHtml(sanitizeRichHtmlForPro(interpolated))
+        : sanitizeRichHtmlForPro(interpolated);
 
       return `<div class="${classes}" style="${baseStyle}">
       ${interpolated}${nestedChildrenHTML}
@@ -1538,7 +1621,7 @@ export function renderInnerElementHTML(
       const isTorn = el.frameStyle === 'torn';
       const isVintageGold = el.frameStyle === 'vintage_gold';
       const isNotebook = el.frameStyle === 'notebook';
-      const filterCss = getImageFilterCSS(el);
+      const filterCss = !isToyhouseFree ? getImageFilterCSS(el) : '';
       const borderRadiusCss = f2uSilhouetteRadius || shapeRadiusOverride || getBorderRadiusCSS(el);
 
       const panX = el.panX ?? 50;
@@ -1547,10 +1630,15 @@ export function renderInnerElementHTML(
       const scaleX = el.flipH ? -1 : 1;
       const scaleY = el.flipV ? -1 : 1;
       const rot = el.imgRotation ?? 0;
-      const blendModeCss = el.blendMode && el.blendMode !== 'normal' ? `mix-blend-mode: ${el.blendMode};` : '';
+      const blendModeCss =
+        !isToyhouseFree && el.blendMode && el.blendMode !== 'normal'
+          ? `mix-blend-mode: ${el.blendMode};`
+          : '';
 
-      // Image transform with pan origin, zoom, flips, and rotation
-      const imgTransform = `transform: scale(${zoom}) scaleX(${scaleX}) scaleY(${scaleY}) rotate(${rot}deg); transform-origin: ${panX}% ${panY}%; object-position: ${panX}% ${panY}%;`;
+      // Image transform with pan origin, zoom, flips, and rotation (omitted on F2U where HTMLPurifier strips transform/transition)
+      const imgTransform = !isToyhouseFree
+        ? `transform: scale(${zoom}) scaleX(${scaleX}) scaleY(${scaleY}) rotate(${rot}deg); transform-origin: ${panX}% ${panY}%; `
+        : '';
 
       let frameWrapperStyle = '';
       if (isPolaroid) {
@@ -1562,16 +1650,19 @@ export function renderInnerElementHTML(
       } else if (isTape) {
         frameWrapperStyle = 'padding: 6px; position: relative;';
       } else if (isTorn) {
-        frameWrapperStyle = `padding: 6px; ${el.shadow !== 'none' ? 'box-shadow: 0 2px 8px rgba(0,0,0,0.15); filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));' : ''}`;
+        const tornDropShadow = !isToyhouseFree ? ' filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));' : '';
+        frameWrapperStyle = `padding: 6px; ${el.shadow !== 'none' ? `box-shadow: 0 2px 8px rgba(0,0,0,0.15);${tornDropShadow}` : ''}`;
       } else if (isVintageGold) {
         frameWrapperStyle = `padding: 9px; background-color: #C79C34; border: 4px ridge #F0D67B; box-shadow: inset 0 0 0 2px #6B4D12${el.shadow !== 'none' ? ', 0 4px 14px rgba(0,0,0,0.28)' : ''};`;
       } else if (isNotebook) {
         frameWrapperStyle = `padding: 8px 10px 10px 20px; background: #FFFDF8; color: #2B2826; border-left: 4px double #D96B6B; border-bottom: 2px dashed rgba(130,120,105,0.35); ${el.shadow !== 'none' ? 'box-shadow: 0 3px 10px rgba(0,0,0,0.08);' : ''}`;
       }
 
+      const tapeLeftRot = isToyhouseFree ? '' : ' transform: rotate(-7deg);';
+      const tapeRightRot = isToyhouseFree ? '' : ' transform: rotate(8deg);';
       const tapeDecorations = isTape
-        ? `<div style="position: absolute; top: -6px; left: 14px; width: 38px; height: 14px; background: rgba(235, 222, 195, 0.82); transform: rotate(-7deg); z-index: 6; pointer-events: none; border-left: 2px dashed rgba(180,160,130,0.4); border-right: 2px dashed rgba(180,160,130,0.4); box-shadow: 0 1px 3px rgba(0,0,0,0.12);"></div>
-           <div style="position: absolute; top: -6px; right: 14px; width: 38px; height: 14px; background: rgba(235, 222, 195, 0.82); transform: rotate(8deg); z-index: 6; pointer-events: none; border-left: 2px dashed rgba(180,160,130,0.4); border-right: 2px dashed rgba(180,160,130,0.4); box-shadow: 0 1px 3px rgba(0,0,0,0.12);"></div>`
+        ? `<div style="position: absolute; top: -6px; left: 14px; width: 38px; height: 14px; background: rgba(235, 222, 195, 0.82);${tapeLeftRot} z-index: 6; pointer-events: none; border-left: 2px dashed rgba(180,160,130,0.4); border-right: 2px dashed rgba(180,160,130,0.4); box-shadow: 0 1px 3px rgba(0,0,0,0.12);"></div>
+           <div style="position: absolute; top: -6px; right: 14px; width: 38px; height: 14px; background: rgba(235, 222, 195, 0.82);${tapeRightRot} z-index: 6; pointer-events: none; border-left: 2px dashed rgba(180,160,130,0.4); border-right: 2px dashed rgba(180,160,130,0.4); box-shadow: 0 1px 3px rgba(0,0,0,0.12);"></div>`
         : '';
 
       const overlayHtml =
@@ -1584,7 +1675,7 @@ export function renderInnerElementHTML(
       const primaryImgCssUrl = escapeCssUrl(primaryImgRaw);
       const safeHoverCssUrl = escapeCssUrl(el.hoverImageUrl);
       const safeHoverSrc = sanitizeHrefUrl(el.hoverImageUrl, '');
-      const hasHoverSwap = el.hoverAction === 'swap_image' && Boolean(safeHoverSrc);
+      const hasHoverSwap = !isToyhouseFree && el.hoverAction === 'swap_image' && Boolean(safeHoverSrc);
       const safeAltAttr = escapeHtmlAttr(el.content || '');
 
       const useF2UBg = el.imageRenderMode !== 'native_img';
@@ -1622,24 +1713,29 @@ export function renderInnerElementHTML(
           : `width: ${circleSize}px; height: ${circleSize}px; max-width: 100%; max-height: 100%; flex-shrink: 0;`
         : 'width: 100%; height: 100%;';
       const activeClipCss = clipPath !== 'none' && !isCircle ? `clip-path: ${clipPath};` : '';
-      const imgCoreStyle = `width: 100%; height: 100%; max-height: 100%; object-fit: ${el.objectFit || 'cover'}; border-radius: ${borderRadiusCss}; ${activeClipCss} ${filterCss}; ${blendModeCss} ${imgTransform} transition: transform 0.3s ease, opacity 0.3s ease;`;
+      const imgTransitionCss = !isToyhouseFree ? ' transition: transform 0.3s ease, opacity 0.3s ease;' : '';
+      const imgCoreStyle = `width: 100%; height: 100%; max-height: 100%; object-fit: ${el.objectFit || 'cover'}; object-position: ${panX}% ${panY}%; border-radius: ${borderRadiusCss}; ${activeClipCss} ${filterCss}; ${blendModeCss} ${imgTransform}${imgTransitionCss}`;
 
       let imgContentHtml = '';
       if (useF2UBg) {
         const faImgRotateClass = isToyhouse ? getFontAwesomeRotationClass(rot) : '';
         const faImgFlipClass = isToyhouse ? getFontAwesomeFlipClass(el.flipH, el.flipV) : '';
+        const normImgRot = ((Math.round(rot) % 360) + 360) % 360;
         const bgTransformParts: string[] = [];
-        if (rot && !faImgRotateClass) bgTransformParts.push(`rotate(${rot}deg)`);
+        if (!isToyhouseFree && normImgRot !== 0 && !faImgRotateClass) {
+          bgTransformParts.push(`rotate(${rot}deg)`);
+        }
         if (!faImgFlipClass) {
           if (el.flipH) bgTransformParts.push('scaleX(-1)');
           if (el.flipV) bgTransformParts.push('scaleY(-1)');
         }
         const bgTransformCss =
           bgTransformParts.length > 0 ? `transform: ${bgTransformParts.join(' ')};` : '';
+        const bgTransitionCss = !isToyhouseFree ? ' transition: opacity 0.3s ease;' : '';
         const primaryBgImgCss = primaryImgCssUrl ? `background-image: url('${primaryImgCssUrl}'); ` : '';
         const swapBgImgCss = safeHoverCssUrl ? `background-image: url('${safeHoverCssUrl}'); ` : '';
-        const bgCoreStyle = `width: 100%; height: 100%; ${primaryBgImgCss}background-position: ${bgPosition}; background-size: ${bgSize}; background-repeat: no-repeat; border-radius: ${borderRadiusCss}; ${activeClipCss} ${filterCss}; ${blendModeCss} ${bgTransformCss} transition: opacity 0.3s ease;`;
-        const swapBgStyle = hasHoverSwap && swapBgImgCss ? `width: 100%; height: 100%; ${swapBgImgCss}background-position: ${bgPosition}; background-size: ${bgSize}; background-repeat: no-repeat; border-radius: ${borderRadiusCss}; ${activeClipCss} ${filterCss}; ${blendModeCss} ${bgTransformCss} position: absolute; top: 0; right: 0; bottom: 0; left: 0; opacity: 0; transition: opacity 0.3s ease;` : '';
+        const bgCoreStyle = `width: 100%; height: 100%; ${primaryBgImgCss}background-position: ${bgPosition}; background-size: ${bgSize}; background-repeat: no-repeat; border-radius: ${borderRadiusCss}; ${activeClipCss} ${filterCss}; ${blendModeCss} ${bgTransformCss}${bgTransitionCss}`;
+        const swapBgStyle = hasHoverSwap && swapBgImgCss ? `width: 100%; height: 100%; ${swapBgImgCss}background-position: ${bgPosition}; background-size: ${bgSize}; background-repeat: no-repeat; border-radius: ${borderRadiusCss}; ${activeClipCss} ${filterCss}; ${blendModeCss} ${bgTransformCss} position: absolute; top: 0; right: 0; bottom: 0; left: 0; opacity: 0;${bgTransitionCss}` : '';
 
         let bgInner = `
           <div class="${hasHoverSwap ? 'dbx-img-primary-swap' : ''}" style="${bgCoreStyle}"></div>
@@ -1669,18 +1765,21 @@ export function renderInnerElementHTML(
       `;
       }
 
+      const trimmedLinkUrl = (el.linkUrl || '').trim();
+      const hasImageLink =
+        el.clickAction === 'link' ||
+        (el.clickAction !== 'lightbox' && Boolean(trimmedLinkUrl && trimmedLinkUrl !== '#'));
+
       if (isPolaroid) {
-        imgContentHtml += `<div style="margin-top: 6px; font-size: 11px; font-weight: 700; color: #222; text-align: center; letter-spacing: 0.04em;">${el.content}</div>`;
+        const captionInner = hasImageLink ? stripAnchorTags(el.content) : el.content;
+        imgContentHtml += `<div style="margin-top: 6px; font-size: 11px; font-weight: 700; color: #222; text-align: center; letter-spacing: 0.04em;">${captionInner}</div>`;
       }
 
       // Handle Click Lightbox or Link
       let finalWrappedInner = imgContentHtml;
-      const hasImageLink =
-        el.clickAction === 'link' ||
-        (el.clickAction !== 'lightbox' && Boolean(el.linkUrl && el.linkUrl.trim()));
       if (hasImageLink) {
         const imgLinkTarget = el.linkTarget || '_blank';
-        finalWrappedInner = `<a href="${sanitizeHrefUrl(el.linkUrl || primaryImgRaw, '#')}" target="${imgLinkTarget}" rel="noopener noreferrer" style="width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-decoration: none; color: inherit; cursor: pointer;">${imgContentHtml}</a>`;
+        finalWrappedInner = `<a href="${sanitizeHrefUrl(trimmedLinkUrl || primaryImgRaw, '#')}" target="${imgLinkTarget}" rel="noopener noreferrer" style="width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-decoration: none; color: inherit; cursor: pointer;">${imgContentHtml}</a>`;
       } else if (el.clickAction === 'lightbox') {
         finalWrappedInner = renderLightboxMarkup({
           lbId: `dbx-lb-${el.id}`,
@@ -1710,6 +1809,7 @@ export function renderInnerElementHTML(
       const btnCls = `${classes} ${isToyhouse ? (isFreeformFixed && !el.autoHeight ? 'btn' : 'btn btn-block') : ''}`;
       const btnHref = sanitizeHrefUrl(el.linkUrl || el.url, '#');
       const btnTarget = el.linkTarget || '_blank';
+      const safeBtnLabel = stripAnchorTags(el.content);
       if (isBoxF2UGeo && hasUniformBorder && (!hasCustomBgSurface || isToyhouseFree)) {
         const innerBtnBg = buildF2UQuadrantSurfaceCss(
           effectiveBoxShape!,
@@ -1717,16 +1817,17 @@ export function renderInnerElementHTML(
           el.shapeCutPx
         );
         return `<a href="${btnHref}" target="${btnTarget}" rel="noopener noreferrer" class="${btnCls}" style="${baseStyle}; ${buildF2UQuadrantSurfaceCss(effectiveBoxShape!, el.borderColor, el.shapeCutPx)}; padding: ${Math.max(1, el.borderWidth)}px; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%; '}cursor: pointer;">
-      <span style="width: 100%; height: 100%; flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; box-sizing: border-box; ${getPaddingCSS(el)}; ${innerBtnBg}">${el.content}</span>
+      <span style="width: 100%; height: 100%; flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; box-sizing: border-box; ${getPaddingCSS(el)}; ${innerBtnBg}">${safeBtnLabel}</span>
     </a>`;
       }
       return `<a href="${btnHref}" target="${btnTarget}" rel="noopener noreferrer" class="${btnCls}" style="${baseStyle}; flex-direction: row; align-items: center; justify-content: center; text-decoration: none; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%; '}cursor: pointer;">
-      <span>${el.content}</span>
+      <span>${safeBtnLabel}</span>
     </a>`;
     }
 
     case 'stat_bar': {
-      const pct = Math.max(0, Math.min(100, parseInt(el.subContent || '75', 10) || 75));
+      const parsedStat = parseInt(el.subContent ?? '75', 10);
+      const pct = Math.max(0, Math.min(100, Number.isNaN(parsedStat) ? 75 : parsedStat));
       return `<div class="${classes}" style="${baseStyle}">
       <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: ${Math.max(11, el.fontSize - 2)}px;">
         <span>${el.content}</span>
@@ -1763,10 +1864,11 @@ export function renderInnerElementHTML(
         : el.subContent
         ? el.subContent.split('\n').filter(Boolean).map((line, i) => {
             const parts = line.split('|').map((s) => s.trim());
+            const parsedCount = parseInt(parts[1] ?? '1', 10);
             return {
               id: `inv-${i}`,
               name: parts[0] || 'Item',
-              count: parseInt(parts[1] || '1', 10) || 1,
+              count: Number.isNaN(parsedCount) ? 1 : parsedCount,
               rarity: (parts[2] as 'common' | 'rare' | 'epic' | 'legendary') || 'common',
               icon: parts[3] || '✦',
             };
@@ -1785,7 +1887,7 @@ export function renderInnerElementHTML(
           const borderRarity = rarityColors[item.rarity || 'common'] || el.borderColor;
           return `        <div style="background: rgba(0,0,0,0.12); border: 1px solid ${borderRarity}; border-radius: 6px; padding: 6px 8px; display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0;">
           <div style="display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden;">
-            <span style="font-size: 13px; shrink: 0;">${item.icon || '✦'}</span>
+            <span style="font-size: 13px; flex-shrink: 0;">${item.icon || '✦'}</span>
             <span style="font-size: 11px; font-weight: 500; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${item.name}</span>
           </div>
           ${item.count && item.count > 1 ? `<span style="font-size: 9px; font-family: monospace; font-weight: 700; background: ${el.borderColor}; color: #fff; padding: 1px 4px; border-radius: 4px;">x${item.count}</span>` : ''}
@@ -1830,7 +1932,7 @@ ${slotHtml}
           const isLast = idx === milestones.length - 1;
           return `        <div style="display: flex; gap: 10px; position: relative;">
           <div style="display: flex; flex-direction: column; align-items: center;">
-            <div style="width: 10px; height: 10px; border-radius: 50%; background: ${el.borderColor}; box-shadow: 0 0 0 3px rgba(200,109,81,0.2); shrink: 0;"></div>
+            <div style="width: 10px; height: 10px; border-radius: 50%; background: ${el.borderColor}; box-shadow: 0 0 0 3px rgba(200,109,81,0.2); flex-shrink: 0;"></div>
             ${!isLast ? `<div style="width: 2px; flex: 1; background: ${el.borderColor}; opacity: 0.35; margin: 2px 0;"></div>` : ''}
           </div>
           <div style="padding-bottom: ${isLast ? '0' : '10px'}; flex: 1;">
@@ -1878,7 +1980,7 @@ ${nodesHtml}
             color: el.borderColor,
           };
           return `        <div style="background: rgba(0,0,0,0.12); border: 1px solid ${el.borderColor}; border-radius: 8px; padding: 8px; display: flex; gap: 8px; align-items: center;">
-          ${node.avatarUrl ? `<img src="${sanitizeHrefUrl(node.avatarUrl, '')}" alt="${escapeHtmlAttr(node.name)}" style="width: 38px; height: 38px; border-radius: 6px; object-fit: cover; border: 1px solid ${meta.color}; shrink: 0;" />` : ''}
+          ${node.avatarUrl ? `<img src="${sanitizeHrefUrl(node.avatarUrl, '')}" alt="${escapeHtmlAttr(node.name)}" style="width: 38px; height: 38px; border-radius: 6px; object-fit: cover; border: 1px solid ${meta.color}; flex-shrink: 0;" />` : ''}
           <div style="flex: 1; min-width: 0;">
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px;">
               <span style="font-weight: 700; font-size: 11px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${node.name}</span>
@@ -1900,12 +2002,15 @@ ${nodesHtml}
     }
 
     case 'pagedoll': {
-      const faAnim = getFontAwesomeAnimClass(el.idleAnimation || 'bounce') || 'fa-bounce';
+      const faAnim =
+        el.idleAnimation === 'none'
+          ? ''
+          : getFontAwesomeAnimClass(el.idleAnimation || 'bounce') || (isToyhouse ? 'fa-bounce' : '');
       const animDur = el.animDuration || 2;
       const safePagedollUrl = escapeCssUrl(
         el.url || 'https://f2.toyhou.se/file/f2-toyhou-se/images/95980873_yi08DhLhBhCs6yr.png'
       );
-      const pagedollCore = `<div class="${faAnim}" style="${safePagedollUrl ? `background-image: url('${safePagedollUrl}'); ` : ''}height: 100%; width: 100%; min-height: ${isFreeformFixed ? 0 : 120}px; background-size: contain; background-position: center; background-repeat: no-repeat; animation-duration: ${animDur}s;"></div>`;
+      const pagedollCore = `<div${faAnim ? ` class="${faAnim}"` : ''} style="${safePagedollUrl ? `background-image: url('${safePagedollUrl}'); ` : ''}height: 100%; width: 100%; min-height: ${isFreeformFixed ? 0 : 120}px; background-size: contain; background-position: center; background-repeat: no-repeat; animation-duration: ${animDur}s;"></div>`;
       if (faRotateClass || rotationCss) {
         return `<div class="${faRotateClass}" style="width: 100%; height: ${isFreeformFixed ? '100%' : `${el.height}px`}; ${rotationCss}; ${opacityCss};">${pagedollCore}</div>`;
       }
@@ -1913,7 +2018,7 @@ ${nodesHtml}
     }
 
     case 'fa_watermark': {
-      const iconClass = el.faIcon || el.content || 'fa-light fa-moon-stars';
+      const iconClass = sanitizeClassListStr(el.faIcon || el.content || 'fa-light fa-moon-stars');
       const iconSize = el.fontSize || 70;
       const op = el.opacity !== undefined ? (el.opacity / 100).toFixed(2) : '0.55';
       const anchor = el.watermarkAnchor || 'center';
@@ -1935,7 +2040,16 @@ ${nodesHtml}
       const wmFlipCls = isToyhouse ? getFontAwesomeFlipClass(el.flipH, el.flipV) : '';
       const wmIconCls = [iconClass, wmFlipCls, faAnimClass].filter(Boolean).join(' ');
       const wmRotCss = !isToyhouseFree && el.rotation && !faRotateClass ? `transform: rotate(${el.rotation}deg);` : '';
-      const wmStageCls = [classes, faRotateClass].filter(Boolean).join(' ');
+      const wmBaseClasses = [
+        'dbx-el',
+        !isToyhouseFree && el.hoverEffect !== 'none' ? `dbx-hover-${el.hoverEffect}` : '',
+        !isToyhouseFree && el.idleAnimation && el.idleAnimation !== 'none'
+          ? `dbx-anim-${el.idleAnimation}`
+          : '',
+        sanitizeClassListStr(el.bsClasses),
+        !isToyhouseFree ? sanitizeClassListStr(el.customCssClass) : '',
+      ];
+      const wmStageCls = [...wmBaseClasses, faRotateClass].filter(Boolean).join(' ');
       return `<div class="${wmStageCls}" style="width: 100%; height: 100%; display: flex; align-items: ${alignY}; justify-content: ${alignX}; font-size: ${iconSize}px; opacity: ${op}; pointer-events: none; color: ${el.textColor || el.borderColor}; ${wmRotCss} box-sizing: border-box;">
       <i class="${wmIconCls}" style="line-height: 1; ${nudgeCss}"></i>
     </div>`;
@@ -2012,9 +2126,10 @@ ${nodesHtml}
       const halfGridGap = (gap / 2).toFixed(1).replace(/\.0$/, '');
       const bsColClass =
         cols === 4 ? 'col-12 col-sm-6 col-md-3' : cols === 3 ? 'col-12 col-md-4' : 'col-12 col-md-6';
+      const gridWidthCss = isToyhouseFree ? 'width: auto;' : `width: calc(100% + ${gap}px);`;
       let gridBody = '';
       if (children.length > 0) {
-        gridBody = `\n      <div class="row no-gutters dbx-bs-row dbx-bs-cols-${cols}" style="margin-left: -${halfGridGap}px; margin-right: -${halfGridGap}px; width: calc(100% + ${gap}px); flex: 1;">\n${children
+        gridBody = `\n      <div class="row no-gutters dbx-bs-row dbx-bs-cols-${cols}" style="margin-left: -${halfGridGap}px; margin-right: -${halfGridGap}px; ${gridWidthCss} flex: 1;">\n${children
           .map(
             (child) =>
               `        <div class="${bsColClass}" style="padding-left: ${halfGridGap}px; padding-right: ${halfGridGap}px; margin-bottom: ${gap}px; box-sizing: border-box; min-width: 0;">${renderInnerElementHTML(child, isToyhouse, allElements, false, isToyhouseFree)}</div>`
@@ -2022,7 +2137,7 @@ ${nodesHtml}
           .join('\n')}\n      </div>`;
       } else {
         const slotTexts = (el.subContent || Array.from({ length: cols }, (_, i) => `Slot ${i + 1}`).join(' || ')).split('||');
-        gridBody = `\n      <div class="row no-gutters dbx-bs-row dbx-bs-cols-${cols}" style="margin-left: -${halfGridGap}px; margin-right: -${halfGridGap}px; width: calc(100% + ${gap}px); flex: 1;">\n${Array.from(
+        gridBody = `\n      <div class="row no-gutters dbx-bs-row dbx-bs-cols-${cols}" style="margin-left: -${halfGridGap}px; margin-right: -${halfGridGap}px; ${gridWidthCss} flex: 1;">\n${Array.from(
           { length: cols },
           (_, i) =>
             `        <div class="${bsColClass}" style="padding-left: ${halfGridGap}px; padding-right: ${halfGridGap}px; margin-bottom: ${gap}px; box-sizing: border-box;"><div style="height: 100%; padding: 8px; border: 1px dashed ${el.borderColor || '#E5E5E5'}; border-radius: 4px; font-size: ${Math.max(11, el.fontSize - 1)}px; white-space: pre-line; box-sizing: border-box;">${(slotTexts[i] || `Slot ${i + 1}`).trim()}</div></div>`
@@ -2060,9 +2175,10 @@ ${nodesHtml}
 
     case 'pure_collapse': {
       const colId = escapeHtmlAttr((el.f2uCollapseId || `col-${el.id}`).replace(/[^a-zA-Z0-9_-]/g, ''));
+      const safeTriggerText = stripAnchorTags(el.content || 'Toggle Collapse');
       return `<div class="${classes}" style="${baseStyle}">
       <a class="btn btn-sm btn-block text-left" data-toggle="collapse" href="#${colId}" role="button" aria-expanded="${el.f2uCollapseDefaultOpen ? 'true' : 'false'}" style="font-weight: 700; color: inherit; border-bottom: 1px solid ${el.borderColor || '#E5E5E5'}; padding: 4px 2px; display: flex; align-items: center; justify-content: space-between; text-decoration: none;">
-        <span>${faInlineIconHtml}${el.content || 'Toggle Collapse'}</span>
+        <span>${faInlineIconHtml}${safeTriggerText}</span>
         <i class="fa-solid fa-chevron-down" style="font-size: 10px; opacity: 0.65;"></i>
       </a>
       <div class="collapse${el.f2uCollapseDefaultOpen ? ' show' : ''}" id="${colId}" style="padding-top: 8px;">
@@ -2074,26 +2190,23 @@ ${nodesHtml}
     case 'pure_link': {
       const target = el.linkTarget || '_blank';
       const linkHref = sanitizeHrefUrl(el.linkUrl || el.url, '#');
+      const safeLinkLabel = stripAnchorTags(el.content || 'Link');
       if (isBoxF2UGeo && hasUniformBorder && (!hasCustomBgSurface || isToyhouseFree)) {
         const innerLinkBg = buildF2UQuadrantSurfaceCss(
           effectiveBoxShape!,
           el.bgColor && el.bgColor !== 'transparent' ? el.bgColor : el.shapeMaskBgColor || '#FAF8F5',
           el.shapeCutPx
         );
-        return `<a href="${linkHref}" target="${target}" rel="noopener noreferrer" class="${classes}" style="${baseStyle}; ${buildF2UQuadrantSurfaceCss(effectiveBoxShape!, el.borderColor, el.shapeCutPx)}; padding: ${Math.max(1, el.borderWidth)}px; text-decoration: none; cursor: pointer; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%;'}"><span style="width: 100%; height: 100%; flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; box-sizing: border-box; ${getPaddingCSS(el)}; ${innerLinkBg}">${faInlineIconHtml}<span>${el.content || 'Link'}</span></span></a>`;
+        return `<a href="${linkHref}" target="${target}" rel="noopener noreferrer" class="${classes}" style="${baseStyle}; ${buildF2UQuadrantSurfaceCss(effectiveBoxShape!, el.borderColor, el.shapeCutPx)}; padding: ${Math.max(1, el.borderWidth)}px; text-decoration: none; cursor: pointer; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%;'}"><span style="width: 100%; height: 100%; flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; box-sizing: border-box; ${getPaddingCSS(el)}; ${innerLinkBg}">${faInlineIconHtml}<span>${safeLinkLabel}</span></span></a>`;
       }
-      return `<a href="${linkHref}" target="${target}" rel="noopener noreferrer" class="${classes}" style="${baseStyle}; flex-direction: row; align-items: center; justify-content: center; text-decoration: none; cursor: pointer; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%;'}">${faInlineIconHtml}<span>${el.content || 'Link'}</span></a>`;
+      return `<a href="${linkHref}" target="${target}" rel="noopener noreferrer" class="${classes}" style="${baseStyle}; flex-direction: row; align-items: center; justify-content: center; text-decoration: none; cursor: pointer; ${isFreeformFixed && !el.autoHeight ? '' : 'width: 100%;'}">${faInlineIconHtml}<span>${safeLinkLabel}</span></a>`;
     }
 
     case 'pure_image_slot': {
-      if (!el.url || !el.url.trim()) {
-        return `<div class="${classes}" style="${baseStyle}; align-items: center; justify-content: center; text-align: center; color: #9CA3AF;">
-          <i class="fa-regular fa-image fa-2x" style="opacity: 0.45; margin-bottom: 6px;"></i>
-          <div style="font-size: 11px;">Blank Image Slot</div>
-        </div>`;
-      }
-      const imgObj: DesignElement = { ...el, type: 'image' };
-      return renderInnerElementHTML(imgObj, isToyhouse, allElements, isFreeformFixed, isToyhouseFree);
+      return `<div class="${classes}" style="${baseStyle}; align-items: center; justify-content: center; text-align: center; color: #9CA3AF;">
+        <i class="fa-regular fa-image fa-2x" style="opacity: 0.45; margin-bottom: 6px;"></i>
+        <div style="font-size: 11px;">Blank Image Slot</div>
+      </div>`;
     }
 
     case 'pure_heading': {
@@ -2143,7 +2256,8 @@ ${nodesHtml}
     }
 
     case 'pure_progress': {
-      const pct = Math.max(0, Math.min(100, parseInt(el.subContent || '65', 10) || 65));
+      const parsedProg = parseInt(el.subContent ?? '65', 10);
+      const pct = Math.max(0, Math.min(100, Number.isNaN(parsedProg) ? 65 : parsedProg));
       const barColor = el.progressBarColor || (el.borderColor !== '#E5E5E5' && el.borderColor !== 'transparent' ? el.borderColor : '#4B5563');
       const barCls = [
         'progress-bar',
@@ -2212,9 +2326,21 @@ export function generatePlatformExport(
   canvasBg = '#F7F5F0',
   canvasPattern: BgPattern = 'none'
 ): ExportResult {
-  const activeElements = elements.filter((e) => !e.hidden);
+  const byId = new Map(elements.map((e) => [e.id, e]));
+  const isEffectivelyHidden = (el: DesignElement): boolean => {
+    const visited = new Set<string>();
+    let cur: DesignElement | undefined = el;
+    while (cur) {
+      if (cur.hidden) return true;
+      if (!cur.parentId || visited.has(cur.parentId)) break;
+      visited.add(cur.parentId);
+      cur = byId.get(cur.parentId);
+    }
+    return false;
+  };
+  const activeElements = elements.filter((e) => !isEffectivelyHidden(e));
   const warnings: ValidationWarning[] = [];
-  const isToyhouseFree = platform === 'toyhouse_free' || platform === 'toyhouse_oc';
+  const isToyhouseFree = isToyhouseFreePlatform(platform);
   const isToyhousePremium =
     platform === 'toyhouse_premium' ||
     platform === 'toyhouse_profile' ||
@@ -2292,7 +2418,7 @@ export function generatePlatformExport(
         severity: 'warning',
         code: 'TH_F2U_GLASS_NOTE',
         message: 'Glass Blur (backdrop-filter) is stripped or unsupported on Toyhouse Free (F2U).',
-        suggestion: 'Use semi-transparent rgba() Background Color or switch to Toyhouse Premium / Carrd Pro.',
+        suggestion: 'Use semi-transparent rgba() Background Color or switch to Toyhouse Premium.',
       });
     }
 
@@ -2321,7 +2447,7 @@ export function generatePlatformExport(
         severity: 'warning',
         code: 'TH_F2U_STYLE_TAG_STRIP',
         message: 'One or more Custom/HTML widgets contain <style> blocks, which are automatically stripped on Toyhouse F2U export (non-destructively).',
-        suggestion: 'Use inline CSS styles inside widgets for F2U safety, or switch to Toyhouse Premium / Carrd Pro.',
+        suggestion: 'Use inline CSS styles inside widgets for F2U safety, or switch to Toyhouse Premium.',
       });
     }
 
@@ -2333,7 +2459,7 @@ export function generatePlatformExport(
         message:
           'One or more active Modifiers (Boolean Mask, Ticket Corners, Diagonal Lines, or Multi-Hole Cutouts) use CSS mask-image or transform: rotate(), which Toyhouse Free may strip.',
         suggestion:
-          'Single-fill Hole Punch, Hollow Ring, H/V Split, H/V/Cross Lines & Corner Brackets are 100% F2U safe. Switch to Toyhouse Premium / Carrd Pro for full Boolean SVG masking.',
+          'Single-fill Hole Punch, Hollow Ring, H/V Split, H/V/Cross Lines & Corner Brackets are 100% F2U safe. Switch to Toyhouse Premium for full Boolean SVG masking.',
       });
     }
 
@@ -2350,13 +2476,13 @@ export function generatePlatformExport(
         message:
           'CSS :hover effects (Lift, Tilt, Glow, Scale, Fade, Image Zoom/Swap) require <style> tags, which Toyhouse Free strips.',
         suggestion:
-          'Use "Hover Tooltip (title)" or "Collapsible / Click Expand" (<details>) for 100% F2U interaction, or switch target to Toyhouse Premium / Carrd Pro.',
+          'Use "Hover Tooltip (title)" or "Collapsible / Click Expand" (<details>) for 100% F2U interaction, or switch target to Toyhouse Premium.',
       });
     }
 
     const hasArbitraryRotation = activeElements.some(
       (e) =>
-        (e.rotation && Math.round(e.rotation) % 90 !== 0) ||
+        (e.type !== 'pure_line' && e.rotation && Math.round(e.rotation) % 90 !== 0) ||
         (e.imgRotation && Math.round(e.imgRotation) % 90 !== 0)
     );
     if (hasArbitraryRotation) {
@@ -2389,7 +2515,11 @@ export function generatePlatformExport(
   }
 
   const usedGoogleFonts = Array.from(
-    new Set(activeElements.map((e) => e.googleFont).filter(Boolean) as string[])
+    new Set(
+      activeElements
+        .map((e) => (e.googleFont ? e.googleFont.replace(/[^a-zA-Z0-9\s-]/g, '').trim() : ''))
+        .filter(Boolean)
+    )
   );
   const googleFontsImportCss =
     usedGoogleFonts.length > 0
@@ -2456,7 +2586,7 @@ export function generatePlatformExport(
 
   const containerSurfaceCss = isCanvasTransparent
     ? 'background-color: transparent;'
-    : getBackgroundPatternCSS(canvasBg, undefined, canvasPattern);
+    : `${getBackgroundPatternCSS(canvasBg, undefined, canvasPattern)};`;
 
   const containerBorderAndPaddingCss = isCanvasTransparent
     ? 'border: none; border-radius: 0; box-shadow: none; padding: 0;'
@@ -2471,7 +2601,8 @@ export function generatePlatformExport(
         const topPct = ((el.y / canvasHeight) * 100).toFixed(2);
         const widthPct = ((el.width / canvasWidth) * 100).toFixed(2);
         const heightPct = ((el.height / canvasHeight) * 100).toFixed(2);
-        return `  <!-- Floating / Pagedoll Layer: ${el.label} -->
+        const safeCommentLabel = (el.label || el.type).replace(/--/g, '- -').replace(/[<>]/g, '');
+        return `  <!-- Floating / Pagedoll Layer: ${safeCommentLabel} -->
   <div style="position: absolute; left: ${leftPct}%; top: ${topPct}%; width: ${widthPct}%; height: ${heightPct}%; z-index: ${el.zIndex || 25}; pointer-events: auto;">
     ${renderInnerElementHTML(el, isToyhouse, activeElements, false, isToyhouseFree)}
   </div>`;
@@ -2579,7 +2710,7 @@ ${colsHtml}
           ? `Hybrid (${solvedRows.length} Rows + ${floatingElements.length} Pagedoll/Floating Layers)`
           : 'Block Grid'
       } -->
-<div class="row no-gutters mx-auto" style="max-width: ${canvasWidth}px; width: 100%; position: relative; min-height: ${canvasHeight}px; ${containerSurfaceCss} ${containerBorderAndPaddingCss} ${containerOverflowCss}">
+<div class="row no-gutters mx-auto" style="max-width: ${canvasWidth}px; width: 100%; position: relative; min-height: ${canvasHeight}px; align-content: flex-start; ${containerSurfaceCss} ${containerBorderAndPaddingCss} ${containerOverflowCss}">
 ${rowsHtml}${floatingHtml}
 </div>${roundTripComment}`
     : `<!-- Generated by DesignBox | Platform: ${platform.toUpperCase()} | Mode: ${

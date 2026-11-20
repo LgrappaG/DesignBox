@@ -32,6 +32,9 @@ import {
   TargetPlatform,
 } from '../types/schema';
 import {
+  resolveElementEffectiveBackdrop,
+} from '../utils/colorMath';
+import {
   getInspectorSectionSummaries,
   isTypographyRelevantForElement,
 } from '../utils/inspectorHelpers';
@@ -138,7 +141,7 @@ const COMPACT_TABS: Array<{
 ];
 
 /** 2-Tab Compact Right Inspector (`Design | Code & Pro`), plus Canvas Setup & Multi-Select Batch controls. */
-export const RightInspector: React.FC<RightInspectorProps> = ({
+export const RightInspector: React.FC<RightInspectorProps> = React.memo(({
   rightCollapsed,
   rightPanelWidth,
   panelResizeDrag,
@@ -375,11 +378,12 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
               <div className="min-w-0 flex-1">
                 <input
                   type="text"
+                  disabled={Boolean(selectedElement.locked)}
                   value={selectedElement.label}
                   onChange={(e) => onUpdateSelected({ label: e.target.value })}
                   style={{ color: 'var(--text-main)' }}
-                  className="font-semibold text-xs bg-transparent border-b border-transparent focus:border-amber-600 focus:outline-none w-full"
-                  title="Click to rename layer"
+                  className="font-semibold text-xs bg-transparent border-b border-transparent focus:border-amber-600 focus:outline-none w-full disabled:opacity-70 disabled:cursor-not-allowed"
+                  title={selectedElement.locked ? 'Layer is locked' : 'Click to rename layer'}
                 />
                 <div style={{ color: 'var(--text-muted)' }} className="text-[10px] font-mono uppercase">
                   {selectedElement.type} · Z:{selectedElement.zIndex || 10}
@@ -418,24 +422,26 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                 </button>
                 <button
                   type="button"
+                  disabled={Boolean(selectedElement.locked)}
                   onClick={() => onAdjustZIndex(5)}
                   style={{
                     backgroundColor: 'var(--bg-panel-alt)',
                     borderColor: 'var(--border-main)',
                   }}
-                  className="px-1.5 py-1 rounded-[5px] border text-[10px] font-mono hover:opacity-80"
+                  className="px-1.5 py-1 rounded-[5px] border text-[10px] font-mono hover:opacity-80 disabled:opacity-35 disabled:cursor-not-allowed"
                   title="Bring Forward (+Z)"
                 >
                   +Z
                 </button>
                 <button
                   type="button"
+                  disabled={Boolean(selectedElement.locked)}
                   onClick={() => onAdjustZIndex(-5)}
                   style={{
                     backgroundColor: 'var(--bg-panel-alt)',
                     borderColor: 'var(--border-main)',
                   }}
-                  className="px-1.5 py-1 rounded-[5px] border text-[10px] font-mono hover:opacity-80"
+                  className="px-1.5 py-1 rounded-[5px] border text-[10px] font-mono hover:opacity-80 disabled:opacity-35 disabled:cursor-not-allowed"
                   title="Send Backward (-Z)"
                 >
                   -Z
@@ -454,9 +460,10 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                 </button>
                 <button
                   type="button"
+                  disabled={Boolean(selectedElement.locked)}
                   onClick={onDeleteSelected}
-                  className="p-1.5 rounded-[5px] bg-red-500/15 text-red-500 hover:bg-red-500/25"
-                  title="Delete (Del)"
+                  className="p-1.5 rounded-[5px] bg-red-500/15 text-red-500 hover:bg-red-500/25 disabled:opacity-35 disabled:cursor-not-allowed"
+                  title={selectedElement.locked ? 'Unlock to delete' : 'Delete (Del)'}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -465,6 +472,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
 
             <QuickAlignToolbar
               pinnedOverlay={Boolean(selectedElement.pinnedOverlay)}
+              disabled={Boolean(selectedElement.locked)}
               onTogglePinnedOverlay={(next) => onUpdateSelected({ pinnedOverlay: next })}
               onAlignSelectedOnCanvas={onAlignSelectedOnCanvas}
             />
@@ -481,7 +489,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                   </span>
                 </div>
                 <p className="text-[10px] leading-snug opacity-90">
-                  Masked on Canvas &amp; stripped cleanly in F2U export. Pro settings stay saved and restore in Toyhouse Premium / Carrd.
+                  Masked on Canvas &amp; stripped cleanly in F2U export. Pro settings stay saved and restore in Toyhouse Premium.
                 </p>
                 <div className="flex flex-wrap gap-1 pt-0.5">
                   {selectedShieldReport.items.map((item) => (
@@ -546,6 +554,14 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
             />
           ) : selectedElement && sectionSummaries ? (
             <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5 text-xs">
+              <fieldset
+                disabled={Boolean(selectedElement.locked)}
+                className={
+                  selectedElement.locked
+                    ? 'opacity-60 pointer-events-none select-none min-w-0 space-y-2.5'
+                    : 'min-w-0 space-y-2.5'
+                }
+              >
               <InspectorCollapsibleSection
                 id="content"
                 title="Content & Widget"
@@ -612,6 +628,12 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                   el={selectedElement}
                   updateSelected={onUpdateSelected}
                   isToyhouseFree={isToyhouseFree}
+                  effectiveFallbackBg={resolveElementEffectiveBackdrop(
+                    selectedElement,
+                    new Map(elements.map((item) => [item.id, item])),
+                    canvasBg,
+                    '#FAF8F5'
+                  )}
                   swatches={swatches}
                   swatchTarget={swatchTarget}
                   setSwatchTarget={onSetSwatchTarget}
@@ -695,6 +717,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                   onTriggerImageUpload={onTriggerImageUpload}
                 />
               </InspectorCollapsibleSection>
+              </fieldset>
             </div>
           ) : (
             <CanvasSettingsInspector
@@ -715,7 +738,14 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
           /* Code & Export Tab (Accessible with or without selected element) */
           <div className="flex-1 flex flex-col overflow-y-auto p-3.5 space-y-2.5 text-xs">
             {selectedElement && sectionSummaries && (
-              <>
+              <fieldset
+                disabled={Boolean(selectedElement.locked)}
+                className={
+                  selectedElement.locked
+                    ? 'opacity-60 pointer-events-none select-none min-w-0 space-y-2.5'
+                    : 'min-w-0 space-y-2.5'
+                }
+              >
                 <InspectorCollapsibleSection
                   id="bs_fa"
                   title="Bootstrap 4 & Font Awesome"
@@ -767,7 +797,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                     isToyhouseFree={isToyhouseFree}
                   />
                 </InspectorCollapsibleSection>
-              </>
+              </fieldset>
             )}
 
             {/* Platform Sanitizer Check */}
@@ -790,7 +820,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
 
               {exportResult.warnings.length === 0 ? (
                 <div className="p-2 rounded-[6px] bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 text-[11px]">
-                  100% compliant with Toyhouse &amp; Carrd HTML/CSS sanitizer.
+                  100% compliant with Toyhouse HTML/CSS sanitizer.
                 </div>
               ) : (
                 exportResult.warnings.map((w, i) => (
@@ -869,5 +899,5 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
       </aside>
     </>
   );
-};
+});
 

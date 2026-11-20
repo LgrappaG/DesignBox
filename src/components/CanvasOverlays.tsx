@@ -44,6 +44,7 @@ import { StudioColorButton } from './shared/StudioColorPicker';
 export interface FloatingSelectionBarProps {
   el: DesignElement;
   selectedElements?: DesignElement[];
+  resolvedOrigin?: { x: number; y: number; width: number; height: number };
   swatches: string[];
   onUpdateSelected: (patch: Partial<DesignElement>) => void;
   onAdjustZIndex?: (delta: number) => void;
@@ -60,6 +61,7 @@ export interface FloatingSelectionBarProps {
 export const FloatingSelectionBar: React.FC<FloatingSelectionBarProps> = ({
   el,
   selectedElements,
+  resolvedOrigin,
   swatches,
   onUpdateSelected,
   onAdjustZIndex,
@@ -95,7 +97,7 @@ export const FloatingSelectionBar: React.FC<FloatingSelectionBarProps> = ({
       >
         <span
           style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--accent)' }}
-          className="text-[9.5px] font-mono font-bold px-1.5 py-0.2 rounded-full mr-0.5"
+          className="text-[9.5px] font-mono font-bold px-1.5 py-[1px] rounded-full mr-0.5"
         >
           {multiList.length} selected
         </span>
@@ -216,16 +218,65 @@ export const FloatingSelectionBar: React.FC<FloatingSelectionBarProps> = ({
     );
   }
 
+  const boxOrigin = resolvedOrigin ?? {
+    x: el.x,
+    y: el.y,
+    width: el.width,
+    height: el.height,
+  };
   const isTextLike = el.type === 'text' || el.type === 'pure_heading' || el.type === 'pure_paragraph';
   const secondaryColor = isTextLike ? el.textColor : el.borderColor;
-  const barTop = el.y >= 36 ? el.y - 30 : el.y + el.height + 24;
+  const barTop = boxOrigin.y >= 36 ? boxOrigin.y - 30 : boxOrigin.y + boxOrigin.height + 24;
+
+  if (el.locked) {
+    return (
+      <div
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        style={{
+          left: Math.max(8, boxOrigin.x + boxOrigin.width / 2),
+          top: barTop,
+          transform: 'translateX(-50%)',
+          backgroundColor: 'color-mix(in srgb, var(--bg-panel) 92%, transparent)',
+          borderColor: '#D97706',
+        }}
+        className="absolute z-[92] h-[26px] border rounded-full px-2 py-0.5 backdrop-blur-md shadow-lg flex items-center gap-1 whitespace-nowrap"
+      >
+        <span className="text-[9.5px] font-mono font-bold text-amber-500 flex items-center gap-1">
+          <Lock className="w-3 h-3" />
+          Locked
+        </span>
+        {onDuplicateSelected && (
+          <button
+            type="button"
+            onClick={onDuplicateSelected}
+            className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-black/10 dark:hover:bg-white/10"
+            title="Duplicate Unlocked Copy (Ctrl+D)"
+          >
+            <CopyPlus className="w-3 h-3" />
+          </button>
+        )}
+        {onToggleLock && (
+          <button
+            type="button"
+            onClick={() => onToggleLock(el.id)}
+            className="px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-500 hover:bg-amber-500/25 text-[9.5px] font-mono font-bold flex items-center gap-1"
+            title="Unlock Layer"
+          >
+            <Unlock className="w-3 h-3" />
+            <span>Unlock</span>
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
       style={{
-        left: Math.max(8, el.x + el.width / 2),
+        left: Math.max(8, boxOrigin.x + boxOrigin.width / 2),
         top: barTop,
         transform: 'translateX(-50%)',
         backgroundColor: 'color-mix(in srgb, var(--bg-panel) 88%, transparent)',
@@ -1182,7 +1233,7 @@ export const SpotlightQuickAddModal: React.FC<SpotlightQuickAddModalProps> = ({
                       <span className="font-semibold text-xs truncate">{item.label}</span>
                       <span
                         style={{ color: 'var(--text-muted)', backgroundColor: 'var(--bg-input)' }}
-                        className="text-[9px] font-mono px-1.5 py-0.2 rounded"
+                        className="text-[9px] font-mono px-1.5 py-[1px] rounded"
                       >
                         {item.categoryLabel}
                       </span>

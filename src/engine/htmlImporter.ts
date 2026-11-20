@@ -8,7 +8,8 @@ import {
   TabItem,
   UiTheme,
 } from '../types/schema';
-import { buildDefaultElement } from '../utils/elementFactory';
+import { buildDefaultElement, createUniqueElementId } from '../utils/elementFactory';
+import { sanitizeRichHtmlForPro } from './f2uShield';
 
 export interface HtmlImportBreakdown {
   rows: number;
@@ -71,6 +72,8 @@ export interface HtmlImportOptions {
   canvasWidth?: number;
   startRowIndex?: number;
   startY?: number;
+  existingCount?: number;
+  maxRowIndex?: number;
 }
 
 function parseInlineStyles(styleAttr: string | null): Record<string, string> {
@@ -236,7 +239,9 @@ function applyCommonInlineCssToElement(base: DesignElement, el: Element): Design
   if (css['text-align'] === 'center' || /\btext-center\b/.test(cls)) next.textAlign = 'center';
   else if (css['text-align'] === 'right' || /\btext-right\b/.test(cls)) next.textAlign = 'right';
 
-  if (css['font-family'] && /serif/i.test(css['font-family'])) next.fontFamily = 'serif';
+  if (css['font-family'] && /\bserif\b/i.test(css['font-family'].replace(/sans-serif/gi, ''))) {
+    next.fontFamily = 'serif';
+  }
   if (css['font-family'] && /mono|courier|consolas/i.test(css['font-family'])) next.fontFamily = 'mono';
 
   const overflowVal = (css['overflow'] || css['overflow-y'] || '').toLowerCase();
@@ -317,7 +322,33 @@ export function parseToyhouseHtmlToDesign(
   if (roundTripMatch) {
     const decoded = decodeRoundTripPayload(roundTripMatch[1]);
     if (decoded && Array.isArray(decoded.elements) && decoded.elements.length > 0) {
-      const cloned = decoded.elements.map((el) => ({ ...el }));
+      const isAppendImport = Boolean(
+        (options.existingCount && options.existingCount > 0) ||
+          (startRowIndex && startRowIndex > 0)
+      );
+      let cloned = decoded.elements.map((el) => ({ ...el }));
+      if (isAppendImport) {
+        const idMap = new Map<string, string>();
+        for (const el of cloned) {
+          idMap.set(el.id, createUniqueElementId('imp', []));
+        }
+        const rootYs = cloned.filter((e) => !e.parentId).map((e) => e.y);
+        const minRootY = rootYs.length > 0 ? Math.min(...rootYs) : 0;
+        cloned = cloned.map((el) => {
+          const newId = idMap.get(el.id) || el.id;
+          const mappedParent = el.parentId ? (idMap.get(el.parentId) ?? el.parentId) : el.parentId;
+          return {
+            ...el,
+            id: newId,
+            parentId: mappedParent,
+            ...(el.type === 'pure_collapse'
+              ? { f2uCollapseId: `col-${newId.replace(/[^a-zA-Z0-9_-]/g, '')}` }
+              : {}),
+            rowIndex: (el.rowIndex || 0) + startRowIndex,
+            y: el.parentId ? el.y : Math.max(0, startY + (el.y - minRootY)),
+          };
+        });
+      }
       for (const el of cloned) {
         if (el.type === 'image' || el.type === 'pure_image_slot') breakdown.images += 1;
         else if (el.type === 'tabs' || el.type === 'pure_f2u_tabs') breakdown.tabs += 1;
@@ -346,6 +377,37 @@ export function parseToyhouseHtmlToDesign(
   const doc = parser.parseFromString(trimmed, 'text/html');
   doc.querySelectorAll('script, style').forEach((n) => n.remove());
 
+  const findElementById = (id: string): Element | null => {
+    if (!id) return null;
+    if (typeof doc.getElementById === 'function') {
+      const byId = doc.getElementById(id);
+      if (byId) return byId;
+    }
+    const walk = (root: Element): Element | null => {
+      for (const ch of Array.from(root.children)) {
+        if (ch.id === id) return ch;
+        const nested = walk(ch);
+        if (nested) return nested;
+      }
+      return null;
+    };
+    return doc.body ? walk(doc.body) : null;
+  };
+
+  const filterLeafMatches = (matches: Element[]): Element[] =>
+    matches.filter(
+      (candidate) =>
+        !matches.some((other) => {
+          if (other === candidate) return false;
+          let cur = other.parentElement;
+          while (cur) {
+            if (cur === candidate) return true;
+            cur = cur.parentElement;
+          }
+          return false;
+        })
+    );
+
   const produced: DesignElement[] = [];
 
   let currentRowIndex = startRowIndex;
@@ -363,7 +425,7 @@ export function parseToyhouseHtmlToDesign(
     height: number
   ): DesignElement => {
     const el = buildDefaultElement(type, produced, uiTheme, null);
-    const id = `imp-${type}-${produced.length + 1}-${Date.now().toString().slice(-3)}`;
+    const id = createUniqueElementId(`imp-${type}`, produced);
     return {
       ...el,
       id,
@@ -396,7 +458,7 @@ export function parseToyhouseHtmlToDesign(
       label: `Imported Widget (${tagHint})`,
       content: '',
       subContent: '',
-      customHtml: node.outerHTML,
+      customHtml: sanitizeRichHtmlForPro(node.outerHTML),
       customPropDefs: [],
       customProps: {},
       padding: parsePxNumber(parseInlineStyles(node.getAttribute('style'))['padding']) ?? 8,
@@ -820,7 +882,9 @@ export function parseToyhouseHtmlToDesign(
     if (isCardOrBox || tag === 'div') {
       const cardHeader = node.querySelector('.card-header, h1, h2, h3, h4, h5, h6');
       const headerText = cardHeader?.textContent?.trim() || '';
-      const paragraphs = Array.from(node.querySelectorAll('p, .card-body, .card-block, .card-text'));
+      const paragraphs = filterLeafMatches(
+        Array.from(node.querySelectorAll('p, .card-body, .card-block, .card-text'))
+      );
       const rawBodyText =
         paragraphs.length > 0
           ? paragraphs
@@ -861,7 +925,9 @@ export function parseToyhouseHtmlToDesign(
     );
 
   const extractColumnText = (el: Element): string => {
-    const blocks = Array.from(el.querySelectorAll('p, h1, h2, h3, h4, h5, h6, .card-body, .card-text'));
+    const blocks = filterLeafMatches(
+      Array.from(el.querySelectorAll('p, h1, h2, h3, h4, h5, h6, .card-body, .card-text'))
+    );
     if (blocks.length > 0) {
       return blocks
         .map((b) => b.textContent?.replace(/\s+/g, ' ').trim())
@@ -881,10 +947,20 @@ export function parseToyhouseHtmlToDesign(
       if (tag === 'br') continue;
 
       // Pair [data-toggle="collapse"] trigger + target .collapse panel -> accordion
-      const collapseTrigger =
-        node.getAttribute('data-toggle') === 'collapse'
-          ? node
-          : node.querySelector('[data-toggle="collapse"]');
+      // Never swallow multi-column .row/.container blocks or DesignBox lightbox triggers.
+      const isLayoutContainer =
+        node.classList.contains('row') ||
+        node.classList.contains('container') ||
+        node.classList.contains('container-fluid');
+      const directTrigger = node.getAttribute('data-toggle') === 'collapse' ? node : null;
+      const nestedTrigger =
+        !isLayoutContainer &&
+        !directTrigger &&
+        !node.querySelector('.row, .nav-tabs, .nav-pills, .tab-content') &&
+        node.children.length <= 2
+          ? node.querySelector('[data-toggle="collapse"]')
+          : null;
+      const collapseTrigger = directTrigger || nestedTrigger;
       if (collapseTrigger) {
         const rawTarget = (
           collapseTrigger.getAttribute('href') ||
@@ -892,36 +968,38 @@ export function parseToyhouseHtmlToDesign(
           ''
         ).trim();
         const targetId = rawTarget.startsWith('#') ? rawTarget.slice(1) : rawTarget;
-        const siblingTarget =
-          nodes[i + 1] &&
-          (nodes[i + 1].classList.contains('collapse') ||
-            (targetId !== '' && nodes[i + 1].id === targetId))
-            ? nodes[i + 1]
-            : null;
-        const targetEl =
-          siblingTarget ||
-          node.querySelector('.collapse') ||
-          (targetId ? doc.querySelector(`#${targetId}`) : null);
+        if (!targetId.startsWith('dbx-lb-')) {
+          const siblingTarget =
+            nodes[i + 1] &&
+            (nodes[i + 1].classList.contains('collapse') ||
+              (targetId !== '' && nodes[i + 1].id === targetId))
+              ? nodes[i + 1]
+              : null;
+          const targetEl =
+            siblingTarget ||
+            node.querySelector('.collapse') ||
+            (targetId ? findElementById(targetId) : null);
 
-        if (targetEl) {
-          consumedNodes.add(targetEl);
-          const title = collapseTrigger.textContent?.replace(/\s+/g, ' ').trim() || 'Accordion';
-          const bodyNode = targetEl.querySelector('.card-body, .card-block') || targetEl;
-          const bodyText = bodyNode.textContent?.replace(/\s+/g, ' ').trim() || '';
-          const base = createFromType('accordion', currentRowIndex, 12, marginX, currentY, usableWidth, 88);
-          const styled = applyCommonInlineCssToElement(base, node);
-          breakdown.boxes += 1;
-          produced.push({
-            ...styled,
-            label: 'Imported Collapse Accordion',
-            content: title,
-            subContent: bodyText || 'Collapsed content.',
-            collapseDefaultOpen: targetEl.classList.contains('show'),
-            f2uCollapseId: targetId || undefined,
-          });
-          currentRowIndex += 1;
-          currentY += 104;
-          continue;
+          if (targetEl) {
+            consumedNodes.add(targetEl);
+            const title = collapseTrigger.textContent?.replace(/\s+/g, ' ').trim() || 'Accordion';
+            const bodyNode = targetEl.querySelector('.card-body, .card-block') || targetEl;
+            const bodyText = bodyNode.textContent?.replace(/\s+/g, ' ').trim() || '';
+            const base = createFromType('accordion', currentRowIndex, 12, marginX, currentY, usableWidth, 88);
+            const styled = applyCommonInlineCssToElement(base, node);
+            breakdown.boxes += 1;
+            produced.push({
+              ...styled,
+              label: 'Imported Collapse Accordion',
+              content: title,
+              subContent: bodyText || 'Collapsed content.',
+              collapseDefaultOpen: targetEl.classList.contains('show'),
+              f2uCollapseId: targetId || undefined,
+            });
+            currentRowIndex += 1;
+            currentY += 104;
+            continue;
+          }
         }
       }
 

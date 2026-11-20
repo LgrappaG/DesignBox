@@ -77,6 +77,9 @@ export async function saveProjectAtPathNative(
   path: string,
   content: string
 ): Promise<SavedProjectPayload> {
+  if (!isTauriRuntime()) {
+    throw new Error('Desktop Tauri runtime is not available.');
+  }
   return invokeTauri<SavedProjectPayload>('save_project_at_path', { path, content });
 }
 
@@ -84,10 +87,16 @@ export async function saveProjectToDiskFallback(
   filename: string,
   content: string
 ): Promise<string> {
+  if (!isTauriRuntime()) {
+    throw new Error('Desktop Tauri runtime is not available.');
+  }
   return invokeTauri<string>('save_project_to_disk', { filename, content });
 }
 
 export async function readProjectFileNative(path: string): Promise<OpenedProjectPayload> {
+  if (!isTauriRuntime()) {
+    throw new Error('Desktop Tauri runtime is not available.');
+  }
   return invokeTauri<OpenedProjectPayload>('read_project_file', { path });
 }
 
@@ -191,6 +200,30 @@ export async function validatePlatformSnippetNative(
     });
   } catch {
     return null;
+  }
+}
+
+export async function registerDesktopCloseGuard(
+  shouldPrompt: () => boolean,
+  onBeforeClose: () => void
+): Promise<() => void> {
+  if (!isTauriRuntime()) {
+    return () => {};
+  }
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    return await getCurrentWindow().onCloseRequested((event) => {
+      onBeforeClose();
+      if (!shouldPrompt()) return;
+      const confirmed = window.confirm(
+        'You have unsaved changes. Close DesignBox without saving?'
+      );
+      if (!confirmed) {
+        event.preventDefault();
+      }
+    });
+  } catch {
+    return () => {};
   }
 }
 

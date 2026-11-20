@@ -248,6 +248,21 @@ body {
   display: flex;
   flex-wrap: wrap;
 }
+
+@keyframes dbxFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dbx-fade-up {
+  animation: dbxFadeUp 180ms ease-out both;
+}
 .dbx-canvas-host .dbx-bs-row > .col-12 {
   flex: 0 0 100%;
   max-width: 100%;

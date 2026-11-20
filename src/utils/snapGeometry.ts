@@ -1,4 +1,5 @@
 import { CanvasGuide, DesignElement, SnapDistanceBadge, SnapGuideLine } from '../types/schema';
+import { getRotatedBoundingBox } from './canvasGeometry';
 
 export interface SnapRect {
   id: string;
@@ -12,10 +13,31 @@ const SNAP_GRID = 4;
 const EDGE_SNAP_TOLERANCE = 7;
 const CENTER_SNAP_TOLERANCE = 9;
 
-interface AxisTarget {
+export interface AxisTarget {
   pos: number;
   kind: 'center' | 'edge' | 'guide';
   tolerance: number;
+}
+
+export interface SnapTargetCache {
+  xTargets: AxisTarget[];
+  yTargets: AxisTarget[];
+  others: SnapRect[];
+}
+
+export function buildSnapTargetCache(params: {
+  others: SnapRect[];
+  guides: CanvasGuide[];
+  canvasWidth: number;
+  canvasHeight: number;
+  zoom?: number;
+}): SnapTargetCache {
+  const { others, guides, canvasWidth, canvasHeight, zoom = 1 } = params;
+  return {
+    xTargets: collectAxisTargets('x', canvasWidth, others, guides, zoom),
+    yTargets: collectAxisTargets('y', canvasHeight, others, guides, zoom),
+    others,
+  };
 }
 
 function clampSnapZoom(zoom?: number): number {
@@ -177,8 +199,9 @@ export function computeMultiSelectMoveDelta(params: {
   guides: CanvasGuide[];
   magneticSnap: boolean;
   zoom?: number;
+  cachedTargets?: SnapTargetCache;
 }): { dx: number; dy: number; lines: SnapGuideLine[]; spacing: SnapDistanceBadge[] } {
-  const { movingRects, dx, dy, canvasWidth, canvasHeight, others, guides, magneticSnap, zoom } = params;
+  const { movingRects, dx, dy, canvasWidth, canvasHeight, others, guides, magneticSnap, zoom, cachedTargets } = params;
   if (movingRects.length === 0) {
     return { dx: Math.round(dx), dy: Math.round(dy), lines: [], spacing: [] };
   }
@@ -201,6 +224,7 @@ export function computeMultiSelectMoveDelta(params: {
     magneticSnap,
     clampToCanvas: true,
     zoom,
+    cachedTargets,
   });
 
   return {
@@ -223,6 +247,7 @@ export function computeSmartMoveSnap(params: {
   magneticSnap: boolean;
   clampToCanvas?: boolean;
   zoom?: number;
+  cachedTargets?: SnapTargetCache;
 }): {
   x: number;
   y: number;
@@ -241,6 +266,7 @@ export function computeSmartMoveSnap(params: {
     magneticSnap,
     clampToCanvas = true,
     zoom = 1,
+    cachedTargets,
   } = params;
 
   const boundedX = clampToCanvas
@@ -259,8 +285,9 @@ export function computeSmartMoveSnap(params: {
     };
   }
 
-  const xTargets = collectAxisTargets('x', canvasWidth, others, guides, zoom);
-  const yTargets = collectAxisTargets('y', canvasHeight, others, guides, zoom);
+  const xTargets = cachedTargets ? cachedTargets.xTargets : collectAxisTargets('x', canvasWidth, others, guides, zoom);
+  const yTargets = cachedTargets ? cachedTargets.yTargets : collectAxisTargets('y', canvasHeight, others, guides, zoom);
+  const spacingOthers = cachedTargets ? cachedTargets.others : others;
 
   const snappedX = snapBoxAxis(boundedX, width, xTargets);
   const snappedY = snapBoxAxis(boundedY, height, yTargets);
@@ -280,7 +307,7 @@ export function computeSmartMoveSnap(params: {
     lines.push({ ...snappedY.matchedLine, axis: 'y' });
   }
 
-  const spacing = computeNeighborSpacing({ x: finalX, y: finalY, width, height }, others);
+  const spacing = computeNeighborSpacing({ x: finalX, y: finalY, width, height }, spacingOthers);
 
   return { x: finalX, y: finalY, lines, spacing };
 }
@@ -301,6 +328,7 @@ export function computeSmartResizeSnap(params: {
   guides: CanvasGuide[];
   magneticSnap: boolean;
   zoom?: number;
+  cachedTargets?: SnapTargetCache;
 }): {
   x: number;
   y: number;
@@ -324,6 +352,7 @@ export function computeSmartResizeSnap(params: {
     guides,
     magneticSnap,
     zoom = 1,
+    cachedTargets,
   } = params;
 
   const anchorRight = origX + origW;
@@ -367,8 +396,8 @@ export function computeSmartResizeSnap(params: {
     return { x: finalX, y: finalY, width: finalW, height: finalH, lines };
   }
 
-  const xTargets = collectAxisTargets('x', canvasWidth, others, guides, zoom);
-  const yTargets = collectAxisTargets('y', canvasHeight, others, guides, zoom);
+  const xTargets = cachedTargets ? cachedTargets.xTargets : collectAxisTargets('x', canvasWidth, others, guides, zoom);
+  const yTargets = cachedTargets ? cachedTargets.yTargets : collectAxisTargets('y', canvasHeight, others, guides, zoom);
 
   const findEdgeMatch = (val: number, targets: AxisTarget[]): AxisTarget | null => {
     let best: AxisTarget | null = null;
@@ -430,12 +459,25 @@ export function extractOtherSnapRects(
       }
       return !el.parentId;
     })
-    .map((el) => ({
-      id: el.id,
-      x: parentId ? (el.childOffsetX ?? 12) : el.x,
-      y: parentId ? (el.childOffsetY ?? 12) : el.y,
-      width: parentId ? (el.childCustomWidth || el.width) : el.width,
-      height: parentId ? (el.childCustomHeight || el.height) : el.height,
-    }));
+    .map((el) => {
+      const rawX = parentId ? (el.childOffsetX ?? 12) : el.x;
+      const rawY = parentId ? (el.childOffsetY ?? 12) : el.y;
+      const rawW = parentId ? (el.childCustomWidth || el.width) : el.width;
+      const rawH = parentId ? (el.childCustomHeight || el.height) : el.height;
+      const aabb = getRotatedBoundingBox({
+        x: rawX,
+        y: rawY,
+        width: rawW,
+        height: rawH,
+        rotation: el.rotation,
+      });
+      return {
+        id: el.id,
+        x: aabb.x,
+        y: aabb.y,
+        width: aabb.width,
+        height: aabb.height,
+      };
+    });
 }
 

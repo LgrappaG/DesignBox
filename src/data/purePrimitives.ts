@@ -287,7 +287,6 @@ export const PURE_PRIMITIVE_DEFAULTS: Record<PureElementType, Partial<DesignElem
     label: 'Blank Bootstrap Collapse',
     content: 'Toggle Collapse',
     subContent: 'Bootstrap 4 data-toggle="collapse" target body (100% F2U Safe).',
-    f2uCollapseId: `col-${Math.floor(100 + Math.random() * 899)}`,
     f2uCollapseDefaultOpen: false,
     width: 320,
     height: 110,

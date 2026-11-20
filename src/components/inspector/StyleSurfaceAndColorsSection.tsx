@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link as LinkIcon, Unlink } from 'lucide-react';
+import { AlertTriangle, Link as LinkIcon, ShieldCheck, Unlink } from 'lucide-react';
 import { BgPattern, BorderStyle, DesignElement } from '../../types/schema';
 import {
   GradientAndBgImageSection,
@@ -12,12 +12,18 @@ import {
   getDisplayBorderStyle,
   getDisplayBorderWidth,
 } from '../../utils/borderHelpers';
+import {
+  evaluateWcagContrast,
+  suggestAccessibleTextColor,
+} from '../../utils/colorMath';
+import { isTypographyRelevantForElement } from '../../utils/inspectorHelpers';
 import { InspectorSubExpander } from './InspectorCollapsibleSection';
 
 interface StyleSurfaceAndColorsSectionProps {
   el: DesignElement;
   updateSelected: (patch: Partial<DesignElement>) => void;
   isToyhouseFree: boolean;
+  effectiveFallbackBg?: string;
   swatches: string[];
   swatchTarget: 'bgColor' | 'borderColor' | 'textColor';
   setSwatchTarget: (target: 'bgColor' | 'borderColor' | 'textColor') => void;
@@ -42,6 +48,7 @@ export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSection
   el,
   updateSelected,
   isToyhouseFree,
+  effectiveFallbackBg = '#FAF8F5',
   swatches,
   swatchTarget,
   setSwatchTarget,
@@ -49,6 +56,16 @@ export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSection
   onApplySwatchColor,
   onRemoveSwatch,
 }) => {
+  const showWcagCheck = isTypographyRelevantForElement(el);
+  const contrastReport = showWcagCheck
+    ? evaluateWcagContrast(
+        el.textColor,
+        el.bgColor,
+        effectiveFallbackBg,
+        el.fontSize || 13,
+        el.fontWeight === 'bold'
+      )
+    : null;
   const displayBorderWidth = getDisplayBorderWidth(el);
   const displayBorderStyle = getDisplayBorderStyle(el);
   const displayBorderColor = getDisplayBorderColor(el);
@@ -238,6 +255,51 @@ export const StyleSurfaceAndColorsSection: React.FC<StyleSurfaceAndColorsSection
             </button>
           )}
         </div>
+
+        {/* WCAG 2.1 Text Contrast Checker */}
+        {contrastReport && (
+          <div
+            className={`px-2.5 py-1.5 rounded-[7px] border flex items-center justify-between gap-2 text-[10px] ${
+              contrastReport.passesAA
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                : 'bg-rose-500/10 border-rose-500/35 text-rose-700 dark:text-rose-300'
+            }`}
+          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              {contrastReport.passesAA ? (
+                <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
+              ) : (
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-rose-500" />
+              )}
+              <span className="font-mono font-bold">
+                WCAG {contrastReport.ratio.toFixed(1)}:1
+              </span>
+              <span className="px-1 py-[1px] rounded bg-black/10 dark:bg-white/10 font-mono text-[9px] font-bold">
+                {contrastReport.level}
+              </span>
+              {contrastReport.usedFallbackBg && (
+                <span className="opacity-75 truncate" title="Computed against parent/canvas background">
+                  (vs backdrop)
+                </span>
+              )}
+            </div>
+            {!contrastReport.passesAA && (
+              <button
+                type="button"
+                onClick={() =>
+                  updateSelected({
+                    textColor: suggestAccessibleTextColor(el.bgColor, effectiveFallbackBg),
+                  })
+                }
+                style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
+                className="px-2 py-0.5 rounded-[5px] text-[9.5px] font-semibold shrink-0 hover:opacity-90 transition"
+                title="Pick high-contrast ivory or charcoal ink to pass WCAG AA"
+              >
+                Auto-Fix Text
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Unified Border Thickness, Style & 4-Side Controls */}
         <div className="pt-2 border-t border-[var(--border-main)] space-y-1.5">

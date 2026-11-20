@@ -127,7 +127,7 @@ const BLOCK_CATALOG_DEFINITIONS: ReadonlyArray<{
   { type: 'cassette_player', label: 'Cassette Deck', desc: 'Retro cassette tape music widget', categoryLabel: 'Toyhouse Widgets', f2uSafe: true },
   { type: 'relation_card', label: 'Relation Card', desc: 'Single character relationship card', categoryLabel: 'Toyhouse Widgets', f2uSafe: true },
   { type: 'palette_strip', label: 'Color Swatches', desc: 'Character reference color strip', categoryLabel: 'Toyhouse Widgets', f2uSafe: true },
-  { type: 'social_links', label: 'Social Link Bar', desc: 'Links bar for Carrd / Toyhouse', categoryLabel: 'Toyhouse Widgets', f2uSafe: true },
+  { type: 'social_links', label: 'Social Link Bar', desc: 'Links bar for Toyhouse profiles', categoryLabel: 'Toyhouse Widgets', f2uSafe: true },
   { type: 'accordion', label: 'Spoiler Box', desc: 'Collapsible spoiler / warning box', categoryLabel: 'Toyhouse Widgets', f2uSafe: true },
 
   // Decorative

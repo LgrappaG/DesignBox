@@ -18,10 +18,8 @@ import {
   FolderPlus,
   Hand,
   Link2,
-  Lock,
   MousePointer,
   Minus,
-  RotateCw,
   Scissors,
   Search,
   ShieldAlert,
@@ -34,6 +32,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
+import { CanvasElementItem } from './CanvasElementItem';
 import { DynamicRulerCanvas } from './DynamicRulers';
 import { BottomDock } from './BottomDock';
 import { CANVAS_SIZE_PRESETS } from './inspector/BatchAndCanvasInspector';
@@ -49,11 +48,9 @@ import { SearchableCatalogItem, STATIC_CATALOG } from '../data/searchCatalog';
 import {
   getElementF2UShieldReport,
   isSafeUrlValue,
-  maskElementForF2USimulation,
 } from '../engine/f2uShield';
 import {
   getElementEffectiveLinkUrl,
-  getFontFamilyCSS,
   isFloatingCollageElement,
   renderInnerElementHTML,
   SolvedRow,
@@ -67,7 +64,7 @@ import {
   ResizeDir,
   SplitDragState,
 } from '../hooks/useCanvasPointer';
-import { PanDragState } from '../hooks/useViewportNavigation';
+import { CursorTracker, PanDragState } from '../hooks/useViewportNavigation';
 import {
   BgPattern,
   CanvasGuide,
@@ -85,7 +82,37 @@ import {
   TargetPlatform,
   UiTheme,
 } from '../types/schema';
-import { getInnerBoxGeometry, getSplitPaneGeometry } from '../utils/canvasGeometry';
+import {
+  getElementCanvasOrigin,
+  getInnerBoxGeometry,
+  getSplitPaneGeometry,
+} from '../utils/canvasGeometry';
+import { classifyPastedPayload } from '../utils/smartPaste';
+
+const EMPTY_DESCENDANTS: ReadonlyArray<DesignElement> = [];
+
+const CursorCoordsBadge = React.memo<{ cursorTracker: CursorTracker }>(({ cursorTracker }) => {
+  const spanRef = React.useRef<HTMLSpanElement | null>(null);
+  React.useEffect(() => {
+    const update = (s: { x: number; y: number }) => {
+      if (spanRef.current) {
+        spanRef.current.textContent = `X:${s.x} Y:${s.y}`;
+      }
+    };
+    update(cursorTracker.get());
+    return cursorTracker.subscribe(update);
+  }, [cursorTracker]);
+
+  return (
+    <span
+      ref={spanRef}
+      className="font-mono text-[10px] min-w-[78px] tabular-nums"
+      style={{ color: 'var(--text-muted)' }}
+    >
+      X:0 Y:0
+    </span>
+  );
+});
 
 export interface CanvasStageProps {
   elements: DesignElement[];
@@ -106,8 +133,7 @@ export interface CanvasStageProps {
   panOffset: { x: number; y: number };
   canvasScreenLeft: number;
   canvasScreenTop: number;
-  cursorCoords: { x: number; y: number };
-  cursorInViewport: boolean;
+  cursorTracker: CursorTracker;
   isSpacePressed: boolean;
   panDrag: PanDragState | null;
   dragState: DragState | null;
@@ -145,6 +171,8 @@ export interface CanvasStageProps {
   spotlightOpen?: boolean;
   onToggleSpotlight?: (open: boolean) => void;
   onAddCatalogItemAtPosition?: (item: SearchableCatalogItem, x: number, y: number) => void;
+  onDropImageFile?: (file: File, canvasX: number, canvasY: number) => void;
+  onDropImageUrl?: (url: string, canvasX: number, canvasY: number) => void;
   onAdjustZIndex?: (delta: number) => void;
   onBringToFront?: () => void;
   onSendToBack?: () => void;
@@ -182,7 +210,6 @@ export interface CanvasStageProps {
   onExitContainerIsolation: (parentId: string) => void;
   onEnterContainerIsolation: (containerId: string) => void;
   onApplyQuickModifier: (kind: ModifierKind, overrides?: Record<string, unknown>) => void;
-  onSetCursorInViewport: (inside: boolean) => void;
   onSetPanDrag: React.Dispatch<React.SetStateAction<PanDragState | null>>;
   onSetMarqueeSelect: React.Dispatch<React.SetStateAction<MarqueeRect | null>>;
   onSetDrawMarquee: React.Dispatch<React.SetStateAction<MarqueeRect | null>>;
@@ -196,7 +223,7 @@ export interface CanvasStageProps {
     isChildDrag?: boolean
   ) => void;
   onSelectElement: (id: string | null, ids?: string[]) => void;
-  onToggleMultiSelectElement: (id: string) => void;
+  onToggleMultiSelectElement?: (id: string) => void;
   onSetInlineEditId: (id: string | null) => void;
   onUpdateSelected: (patch: Partial<DesignElement>) => void;
   onSetActiveCanvasTabs: React.Dispatch<React.SetStateAction<Record<string, number>>>;
@@ -263,8 +290,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
   panOffset,
   canvasScreenLeft,
   canvasScreenTop,
-  cursorCoords,
-  cursorInViewport,
+  cursorTracker,
   isSpacePressed,
   panDrag,
   dragState,
@@ -302,6 +328,8 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
   spotlightOpen = false,
   onToggleSpotlight,
   onAddCatalogItemAtPosition,
+  onDropImageFile,
+  onDropImageUrl,
   onAdjustZIndex,
   onBringToFront,
   onSendToBack,
@@ -337,7 +365,6 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
   onToggleAutoNestDrop,
   onExitContainerIsolation,
   onEnterContainerIsolation,
-  onSetCursorInViewport,
   onSetPanDrag,
   onSetMarqueeSelect,
   onSetDrawMarquee,
@@ -345,7 +372,6 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
   clientToCanvas,
   onPointerDownElement,
   onSelectElement,
-  onToggleMultiSelectElement,
   onSetInlineEditId,
   onUpdateSelected,
   onSetActiveCanvasTabs,
@@ -431,57 +457,171 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
     return count;
   }, [f2uShieldMap]);
 
+  const solvedColMap = React.useMemo(() => {
+    const m = new Map<string, number>();
+    for (const row of solvedRows) {
+      for (const item of row.elements) {
+        m.set(item.element.id, item.calculatedColSpan);
+      }
+    }
+    return m;
+  }, [solvedRows]);
+
+  const prevDescendantsMapRef = React.useRef<Map<string, DesignElement[]>>(new Map());
+  const descendantsByRootMap = React.useMemo(() => {
+    const childrenMap = new Map<string, DesignElement[]>();
+    for (const item of elements) {
+      if (!item.parentId) continue;
+      let arr = childrenMap.get(item.parentId);
+      if (!arr) {
+        arr = [];
+        childrenMap.set(item.parentId, arr);
+      }
+      arr.push(item);
+    }
+    const result = new Map<string, DesignElement[]>();
+    const collect = (rootId: string): DesignElement[] => {
+      const out: DesignElement[] = [];
+      const visited = new Set<string>([rootId]);
+      const queue = [...(childrenMap.get(rootId) || [])];
+      while (queue.length > 0) {
+        const node = queue.shift()!;
+        if (visited.has(node.id)) continue;
+        visited.add(node.id);
+        out.push(node);
+        const grand = childrenMap.get(node.id);
+        if (grand) queue.push(...grand);
+      }
+      return out;
+    };
+    for (const root of rootCanvasElements) {
+      const fresh = collect(root.id);
+      if (fresh.length === 0) continue;
+      const prev = prevDescendantsMapRef.current.get(root.id);
+      if (
+        prev &&
+        prev.length === fresh.length &&
+        prev.every((p, idx) => p === fresh[idx])
+      ) {
+        result.set(root.id, prev);
+      } else {
+        result.set(root.id, fresh);
+      }
+    }
+    prevDescendantsMapRef.current = result;
+    return result;
+  }, [elements, rootCanvasElements]);
+
+  const selectedIdsRef = React.useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
+  const clientToCanvasRef = React.useRef(clientToCanvas);
+  clientToCanvasRef.current = clientToCanvas;
+
+  const handleContextMenuElement = React.useCallback(
+    (e: React.MouseEvent, el: DesignElement) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!selectedIdsRef.current.includes(el.id)) {
+        onSelectElement(el.id, [el.id]);
+      }
+      const pos = clientToCanvasRef.current(e.clientX, e.clientY);
+      setContextMenu({
+        clientX: e.clientX,
+        clientY: e.clientY,
+        canvasX: Math.round(pos.x),
+        canvasY: Math.round(pos.y),
+        element: el,
+      });
+    },
+    [onSelectElement]
+  );
+
+  const [externalDropActive, setExternalDropActive] = React.useState(false);
+
   const handleViewportDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('application/x-dbx-catalog')) {
+    const types = Array.from(e.dataTransfer.types || []);
+    const supportsDrop =
+      types.includes('application/x-dbx-catalog') ||
+      types.includes('Files') ||
+      types.includes('text/uri-list') ||
+      types.includes('text/plain');
+    if (supportsDrop) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
+      if (!externalDropActive) setExternalDropActive(true);
+    }
+  };
+
+  const handleViewportDragLeave = (e: React.DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+      setExternalDropActive(false);
     }
   };
 
   const handleViewportDrop = (e: React.DragEvent) => {
+    setExternalDropActive(false);
     const raw = e.dataTransfer.getData('application/x-dbx-catalog');
-    if (!raw || !onAddCatalogItemAtPosition) return;
-    e.preventDefault();
-    try {
-      const parsed = JSON.parse(raw) as
-        | { kind: 'element'; elementType: ElementType }
-        | { kind: 'asset'; assetId: string }
-        | { kind: 'fa_icon'; faClass: string; label: string }
-        | { kind: 'blueprint'; blueprintId: string };
-      let matched: SearchableCatalogItem | undefined;
-      if (parsed.kind === 'element') {
-        matched = STATIC_CATALOG.find(
-          (i) => i.kind === 'element' && i.elementType === parsed.elementType
-        );
-      } else if (parsed.kind === 'asset') {
-        matched = STATIC_CATALOG.find(
-          (i) => i.kind === 'asset' && i.assetPreset?.id === parsed.assetId
-        );
-      } else if (parsed.kind === 'fa_icon') {
-        matched = STATIC_CATALOG.find(
-          (i) => i.kind === 'fa_icon' && i.faIcon?.cls === parsed.faClass
-        );
-      } else if (parsed.kind === 'blueprint') {
-        const bp = customBlueprints.find((b) => b.id === parsed.blueprintId);
-        if (bp) {
-          matched = {
-            id: `bp:${bp.id}`,
-            kind: 'blueprint',
-            categoryLabel: 'My Blueprints',
-            label: bp.name,
-            description: bp.description,
-            searchTags: [],
-            f2uSafe: true,
-            blueprint: bp,
-          };
+    if (raw && onAddCatalogItemAtPosition) {
+      e.preventDefault();
+      try {
+        const parsed = JSON.parse(raw) as
+          | { kind: 'element'; elementType: ElementType }
+          | { kind: 'asset'; assetId: string }
+          | { kind: 'fa_icon'; faClass: string; label: string }
+          | { kind: 'blueprint'; blueprintId: string };
+        let matched: SearchableCatalogItem | undefined;
+        if (parsed.kind === 'element') {
+          matched = STATIC_CATALOG.find(
+            (i) => i.kind === 'element' && i.elementType === parsed.elementType
+          );
+        } else if (parsed.kind === 'asset') {
+          matched = STATIC_CATALOG.find(
+            (i) => i.kind === 'asset' && i.assetPreset?.id === parsed.assetId
+          );
+        } else if (parsed.kind === 'fa_icon') {
+          matched = STATIC_CATALOG.find(
+            (i) => i.kind === 'fa_icon' && i.faIcon?.cls === parsed.faClass
+          );
+        } else if (parsed.kind === 'blueprint') {
+          const bp = customBlueprints.find((b) => b.id === parsed.blueprintId);
+          if (bp) {
+            matched = {
+              id: `bp:${bp.id}`,
+              kind: 'blueprint',
+              categoryLabel: 'My Blueprints',
+              label: bp.name,
+              description: bp.description,
+              searchTags: [],
+              f2uSafe: true,
+              blueprint: bp,
+            };
+          }
         }
+        if (matched) {
+          const pos = clientToCanvas(e.clientX, e.clientY);
+          onAddCatalogItemAtPosition(matched, Math.round(pos.x), Math.round(pos.y));
+        }
+      } catch {
+        // Ignore invalid catalog drag payload
       }
-      if (matched) {
-        const pos = clientToCanvas(e.clientX, e.clientY);
-        onAddCatalogItemAtPosition(matched, Math.round(pos.x), Math.round(pos.y));
-      }
-    } catch {
-      // Ignore invalid external drag payload
+      return;
+    }
+
+    const droppedFiles = e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
+    const imageFile = droppedFiles.find((f) => f.type.startsWith('image/'));
+    if (imageFile && onDropImageFile) {
+      e.preventDefault();
+      const pos = clientToCanvas(e.clientX, e.clientY);
+      onDropImageFile(imageFile, Math.round(pos.x), Math.round(pos.y));
+      return;
+    }
+
+    const uriText = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain') || '';
+    const payload = classifyPastedPayload(uriText, e.dataTransfer.getData('text/html') || '');
+    if (payload.kind === 'image_url' && onDropImageUrl) {
+      e.preventDefault();
+      const pos = clientToCanvas(e.clientX, e.clientY);
+      onDropImageUrl(payload.url, Math.round(pos.x), Math.round(pos.y));
     }
   };
 
@@ -507,12 +647,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
         className="min-h-9 py-1 border-b px-2.5 flex flex-wrap items-center justify-between text-[11px] shrink-0 gap-1.5"
       >
         <div className="flex items-center flex-wrap gap-1.5 min-w-0">
-          <span
-            className="font-mono text-[10px] min-w-[78px] tabular-nums"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            X:{cursorCoords.x} Y:{cursorCoords.y}
-          </span>
+          <CursorCoordsBadge cursorTracker={cursorTracker} />
           <span style={{ color: 'var(--border-strong)' }} className="hidden sm:inline">|</span>
 
           <div className="flex items-center flex-wrap gap-1.5">
@@ -811,12 +946,19 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                 originOffsetPx={canvasScreenLeft}
                 canvasExtentPx={canvasWidth}
                 zoom={zoom}
-                cursorCanvasPos={cursorInViewport ? cursorCoords.x : null}
+                cursorTracker={cursorTracker}
                 uiTheme={uiTheme}
                 cuteThemeColors={cuteThemeColors}
                 guides={guides}
                 onStartCreateGuide={(e) => {
-                  if (e.button === 0) onStartGuideDrag('y', e.clientX, e.clientY);
+                  if (e.button === 0) {
+                    try {
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                    } catch {
+                      // Ignore synthetic pointer capture error
+                    }
+                    onStartGuideDrag('y', e.clientX, e.clientY);
+                  }
                 }}
                 onResetPan={onCenterCanvasView}
               />
@@ -836,12 +978,19 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                 originOffsetPx={canvasScreenTop}
                 canvasExtentPx={effectiveCanvasHeight}
                 zoom={zoom}
-                cursorCanvasPos={cursorInViewport ? cursorCoords.y : null}
+                cursorTracker={cursorTracker}
                 uiTheme={uiTheme}
                 cuteThemeColors={cuteThemeColors}
                 guides={guides}
                 onStartCreateGuide={(e) => {
-                  if (e.button === 0) onStartGuideDrag('x', e.clientX, e.clientY);
+                  if (e.button === 0) {
+                    try {
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                    } catch {
+                      // Ignore synthetic pointer capture error
+                    }
+                    onStartGuideDrag('x', e.clientX, e.clientY);
+                  }
                 }}
                 onResetPan={onCenterCanvasView}
               />
@@ -851,6 +1000,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
           <div
             ref={canvasViewportRef}
             onDragOver={handleViewportDragOver}
+            onDragLeave={handleViewportDragLeave}
             onDrop={handleViewportDrop}
             onContextMenu={(e) => {
               e.preventDefault();
@@ -863,12 +1013,17 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                 element: null,
               });
             }}
-            onPointerEnter={() => onSetCursorInViewport(true)}
-            onPointerLeave={() => onSetCursorInViewport(false)}
+            onPointerEnter={() => cursorTracker.setInside(true)}
+            onPointerLeave={() => cursorTracker.setInside(false)}
             onPointerDownCapture={(e) => {
               if (e.button === 1 || (isSpacePressed && e.button === 0)) {
                 e.preventDefault();
                 e.stopPropagation();
+                try {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                } catch {
+                  // Ignore pointer capture errors
+                }
                 onSetPanDrag({
                   startClientX: e.clientX,
                   startClientY: e.clientY,
@@ -881,6 +1036,11 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
             }}
             onPointerDown={(e) => {
               if (e.button !== 0 || canvasTool !== 'select') return;
+              try {
+                e.currentTarget.setPointerCapture(e.pointerId);
+              } catch {
+                // Ignore pointer capture errors
+              }
               if (e.shiftKey && layoutMode !== 'block') {
                 const pos = clientToCanvas(e.clientX, e.clientY);
                 onSetMarqueeSelect({ startX: pos.x, startY: pos.y, curX: pos.x, curY: pos.y });
@@ -904,8 +1064,23 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                 ? 'crosshair'
                 : undefined,
             }}
-            className="flex-1 relative overflow-hidden isolate"
+            className={`flex-1 relative overflow-hidden isolate ${
+              externalDropActive ? 'ring-2 ring-inset ring-[var(--accent)]' : ''
+            }`}
           >
+            {externalDropActive && (
+              <div
+                style={{ backgroundColor: 'var(--accent-soft)', borderColor: 'var(--accent)' }}
+                className="pointer-events-none absolute inset-3 z-[98] border-2 border-dashed rounded-[12px] flex items-center justify-center"
+              >
+                <div
+                  style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--accent)' }}
+                  className="px-4 py-2 rounded-[8px] border shadow-lg text-xs font-semibold flex items-center gap-2"
+                >
+                  <span>Drop element, image file, or image URL onto canvas</span>
+                </div>
+              </div>
+            )}
             {/* Floating Figma-Style Tool & Quick-Modifier Pill */}
             {layoutMode !== 'block' && (
               <div
@@ -988,7 +1163,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                       <button
                         type="button"
                         onClick={() => onExitContainerIsolation(editingContainer.id)}
-                        className="ml-1 px-1.5 py-0.2 rounded-full bg-amber-500 text-white text-[9px] font-bold flex items-center gap-0.5"
+                        className="ml-1 px-1.5 py-[1px] rounded-full bg-amber-500 text-white text-[9px] font-bold flex items-center gap-0.5"
                       >
                         <CornerUpLeft className="w-2.5 h-2.5" />
                         Exit
@@ -1171,7 +1346,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                               {shieldReport?.isShielded && (
                                 <div
                                   className="absolute bottom-1 right-1.5 text-[8.5px] font-mono font-bold px-1.5 py-0.5 rounded-[4px] bg-amber-500/95 text-stone-950 z-20 shadow flex items-center gap-1"
-                                  title={`F2U Shielded (${shieldReport.items.map((i) => i.label).join(' · ')}) — Preserved safely & auto-restored in Premium/Carrd`}
+                                  title={`F2U Shielded (${shieldReport.items.map((i) => i.label).join(' · ')}) — Preserved safely & auto-restored in Toyhouse Premium`}
                                 >
                                   <ShieldAlert className="w-2.5 h-2.5 shrink-0" />
                                   <span>F2U Shield ({shieldReport.items.length})</span>
@@ -1207,6 +1382,11 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                       !isSpacePressed
                     ) {
                       e.stopPropagation();
+                      try {
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                      } catch {
+                        // Ignore pointer capture errors
+                      }
                       const rect = canvasRef.current.getBoundingClientRect();
                       const startX = Math.max(
                         0,
@@ -1323,6 +1503,11 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                         onPointerDown={(e) => {
                           if (e.button !== 0) return;
                           e.stopPropagation();
+                          try {
+                            e.currentTarget.setPointerCapture(e.pointerId);
+                          } catch {
+                            // Ignore pointer capture errors
+                          }
                           onStartGuideDrag('x', e.clientX, e.clientY, guide);
                         }}
                         onDoubleClick={(e) => {
@@ -1338,7 +1523,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                       >
                         <span
                           style={{ backgroundColor: isOutOfBounds ? '#EF4444' : '#0EA5E9' }}
-                          className="absolute top-1 left-1 text-[8.5px] font-mono font-bold px-1 py-0.2 rounded text-white whitespace-nowrap shadow opacity-85 group-hover:opacity-100 pointer-events-none"
+                          className="absolute top-1 left-1 text-[8.5px] font-mono font-bold px-1 py-[1px] rounded text-white whitespace-nowrap shadow opacity-85 group-hover:opacity-100 pointer-events-none"
                         >
                           X:{guide.pos}
                         </span>
@@ -1349,6 +1534,11 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                         onPointerDown={(e) => {
                           if (e.button !== 0) return;
                           e.stopPropagation();
+                          try {
+                            e.currentTarget.setPointerCapture(e.pointerId);
+                          } catch {
+                            // Ignore pointer capture errors
+                          }
                           onStartGuideDrag('y', e.clientX, e.clientY, guide);
                         }}
                         onDoubleClick={(e) => {
@@ -1364,7 +1554,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                       >
                         <span
                           style={{ backgroundColor: isOutOfBounds ? '#EF4444' : '#0EA5E9' }}
-                          className="absolute left-1 top-1 text-[8.5px] font-mono font-bold px-1 py-0.2 rounded text-white whitespace-nowrap shadow opacity-85 group-hover:opacity-100 pointer-events-none"
+                          className="absolute left-1 top-1 text-[8.5px] font-mono font-bold px-1 py-[1px] rounded text-white whitespace-nowrap shadow opacity-85 group-hover:opacity-100 pointer-events-none"
                         >
                           Y:{guide.pos}
                         </span>
@@ -1424,7 +1614,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                         top: badge.y,
                         transform: 'translate(-50%, -50%)',
                       }}
-                      className="absolute z-[99999] pointer-events-none px-1.5 py-0.2 rounded bg-rose-600/95 text-white font-mono text-[8.5px] font-bold shadow"
+                      className="absolute z-[99999] pointer-events-none px-1.5 py-[1px] rounded bg-rose-600/95 text-white font-mono text-[8.5px] font-bold shadow"
                     >
                       {badge.gap}px
                     </div>
@@ -1461,335 +1651,38 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                     const isSelected =
                       selectedIds.length > 0 ? selectedIds.includes(el.id) : selectedId === el.id;
                     const isPrimary = selectedId === el.id;
-                    const isInlineEditing = inlineEditId === el.id;
-                    const isFloating = isFloatingCollageElement(el);
-                    const shieldReport = f2uShieldMap.get(el.id);
-                    const activeLinkUrl = getElementEffectiveLinkUrl(el);
-                    const canvasEl = isToyhouseFreePlatform ? maskElementForF2USimulation(el) : el;
-                    const solvedCol =
-                      solvedRows
-                        .flatMap((r) => r.elements)
-                        .find((x) => x.element.id === el.id)?.calculatedColSpan || el.colSpan;
-                    const activeTabIdx = activeCanvasTabs[el.id] || 0;
-
                     return (
-                      <div
+                      <CanvasElementItem
                         key={el.id}
-                        onClick={(e) => {
-                          if (canvasTool !== 'select') return;
-                          e.stopPropagation();
-                          if ((e.ctrlKey || e.metaKey) && activeLinkUrl) {
-                            openCanvasElementLink(activeLinkUrl);
-                            return;
-                          }
-                          if (e.shiftKey) {
-                            onToggleMultiSelectElement(el.id);
-                          } else {
-                            onSelectElement(el.id, [el.id]);
-                          }
-                        }}
-                        onPointerDown={(e) => {
-                          if (canvasTool !== 'select') return;
-                          onPointerDownElement(e, el, 'move');
-                        }}
-                        onDoubleClick={(e) => {
-                          e.stopPropagation();
-                          if (el.locked || canvasTool !== 'select') return;
-                          if (isPureContainerType(el.type) && !e.altKey) {
-                            onEnterContainerIsolation(el.id);
-                            return;
-                          }
-                          onSelectElement(el.id, [el.id]);
-                          onSetInlineEditId(el.id);
-                        }}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (!selectedIds.includes(el.id)) {
-                            onSelectElement(el.id, [el.id]);
-                          }
-                          const pos = clientToCanvas(e.clientX, e.clientY);
-                          setContextMenu({
-                            clientX: e.clientX,
-                            clientY: e.clientY,
-                            canvasX: Math.round(pos.x),
-                            canvasY: Math.round(pos.y),
-                            element: el,
-                          });
-                        }}
-                        style={{
-                          left: el.x,
-                          top: el.y,
-                          width: el.width,
-                          height: el.height,
-                          zIndex:
-                            editingContainer?.id === el.id
-                              ? 55
-                              : isSelected
-                              ? 60
-                              : el.zIndex || 10,
-                          transform: canvasEl.rotation ? `rotate(${canvasEl.rotation}deg)` : undefined,
-                          opacity:
-                            editingContainer && editingContainer.id !== el.id
-                              ? 0.25
-                              : el.hidden
-                              ? 0.35
-                              : undefined,
-                          pointerEvents:
-                            canvasTool !== 'select' ||
-                            (editingContainer && editingContainer.id !== el.id)
-                              ? 'none'
-                              : undefined,
-                        }}
-                        className={`absolute ${el.locked ? 'cursor-not-allowed' : 'cursor-move'} ${
-                          dropTargetContainerId === el.id
-                            ? 'ring-4 ring-emerald-500 bg-emerald-500/5 rounded-[8px]'
-                            : editingContainer?.id === el.id
-                            ? 'ring-2 ring-amber-500 rounded-[8px]'
-                            : isSelected
-                            ? 'ring-2 ring-[#C86D51] rounded-[8px]'
-                            : ''
-                        } ${el.hidden ? 'border border-dashed border-stone-400' : ''} ${
-                          !isSelected &&
-                          (el.type === 'spacer' ||
-                            (el.bgColor === 'transparent' &&
-                              (el.borderWidth === 0 || el.borderColor === 'transparent')))
-                            ? 'border border-dashed border-stone-400/40 rounded-[6px]'
-                            : ''
-                        }`}
-                      >
-                        {dropTargetContainerId === el.id && (
-                          <div className="absolute -top-6 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded bg-emerald-600 text-white font-mono text-[9.5px] font-bold shadow z-[90] whitespace-nowrap pointer-events-none">
-                            DROP INSIDE: {el.label}
-                          </div>
+                        el={el}
+                        descendants={descendantsByRootMap.get(el.id) ?? EMPTY_DESCENDANTS}
+                        layoutMode={layoutMode}
+                        platform={platform}
+                        isToyhouseFreePlatform={isToyhouseFreePlatform}
+                        isSelected={isSelected}
+                        isPrimary={isPrimary}
+                        showHandles={
+                          isSelected && !el.locked && (selectedIds.length <= 1 || isPrimary)
+                        }
+                        isInlineEditing={inlineEditId === el.id}
+                        isFloating={isFloatingCollageElement(el)}
+                        isDropTarget={dropTargetContainerId === el.id}
+                        isEditingThisContainer={editingContainer?.id === el.id}
+                        isDimmedByIsolation={Boolean(
+                          editingContainer && editingContainer.id !== el.id
                         )}
-                        {(el.locked || activeLinkUrl) && (
-                          <div className="absolute top-1 left-1 flex items-center gap-1 z-30 pointer-events-none">
-                            {el.locked && (
-                              <div
-                                style={{ backgroundColor: '#D97706', color: '#fff' }}
-                                className="text-[9px] font-mono px-1.5 py-0.5 rounded-[4px] shadow-sm flex items-center gap-1"
-                              >
-                                <Lock className="w-2.5 h-2.5" />
-                                <span>LOCKED</span>
-                              </div>
-                            )}
-                            {activeLinkUrl && (
-                              <button
-                                type="button"
-                                onPointerDown={(e) => e.stopPropagation()}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openCanvasElementLink(activeLinkUrl);
-                                }}
-                                className="pointer-events-auto text-[8.5px] font-mono font-bold px-1.5 py-0.5 rounded-[4px] bg-sky-600/95 hover:bg-sky-500 text-white shadow-sm flex items-center gap-1 transition"
-                                title={`Linked: ${activeLinkUrl} (Click badge or Ctrl+Click element to test)`}
-                              >
-                                <Link2 className="w-2.5 h-2.5 shrink-0" />
-                                <span>LINK</span>
-                              </button>
-                            )}
-                          </div>
-                        )}
-                        {el.hidden && (
-                          <div
-                            style={{ backgroundColor: '#78716C', color: '#fff' }}
-                            className="absolute bottom-1 left-1 text-[9px] font-mono px-1.5 py-0.5 rounded-[4px] z-30 pointer-events-none shadow-sm flex items-center gap-1"
-                          >
-                            <EyeOff className="w-2.5 h-2.5" />
-                            <span>HIDDEN</span>
-                          </div>
-                        )}
-                        {shieldReport?.isShielded && (
-                          <div
-                            className="absolute bottom-1 right-1 text-[8.5px] font-mono font-bold px-1.5 py-0.5 rounded-[4px] bg-amber-500/95 text-stone-950 z-30 pointer-events-auto shadow-sm flex items-center gap-1"
-                            title={`F2U Shield Masked: ${shieldReport.items.map((i) => i.label).join(' · ')} — Preserved safely & auto-restores in Toyhouse Premium / Carrd Pro`}
-                          >
-                            <ShieldAlert className="w-2.5 h-2.5 shrink-0" />
-                            <span>F2U Shield ({shieldReport.items.length})</span>
-                          </div>
-                        )}
-
-                        {isSelected && !el.locked && (selectedIds.length <= 1 || isPrimary) && (
-                          <>
-                            <div
-                              onClick={(e) => e.stopPropagation()}
-                              onPointerDown={(e) => onPointerDownElement(e, el, 'rotate')}
-                              style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
-                              className="absolute -bottom-5 left-1/2 -translate-x-1/2 px-1.5 py-0.2 rounded-full text-[8.5px] font-mono cursor-ew-resize flex items-center gap-0.5 shadow z-50"
-                              title="Drag horizontally to rotate element"
-                            >
-                              <RotateCw className="w-2.5 h-2.5" />
-                              <span>
-                                {el.rotation || 0}°
-                                {isToyhouseFreePlatform && el.rotation && Math.round(el.rotation) % 90 !== 0
-                                  ? el.type === 'pure_line'
-                                    ? ' (F2U Line)'
-                                    : ' (0° F2U)'
-                                  : ''}
-                              </span>
-                            </div>
-
-                            <div
-                              style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
-                              className="absolute top-1 right-1 text-[9px] font-mono px-1.5 py-0.5 rounded-[4px] z-30 pointer-events-none shadow-sm"
-                            >
-                              {layoutMode === 'hybrid'
-                                ? isFloating
-                                  ? `FLOAT (z:${el.zIndex || 20})`
-                                  : `col-lg-${solvedCol}`
-                                : `${el.x},${el.y}`}
-                            </div>
-                          </>
-                        )}
-
-                        {isInlineEditing ? (
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            className="w-full h-full flex flex-col gap-1 p-2 bg-stone-900/95 rounded-[8px] z-40"
-                          >
-                            <input
-                              autoFocus
-                              value={el.content}
-                              onChange={(e) => onUpdateSelected({ content: e.target.value })}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Escape' || e.key === 'Enter') onSetInlineEditId(null);
-                              }}
-                              className="w-full bg-stone-800 text-white px-2 py-1 rounded border border-amber-500 text-xs font-bold"
-                            />
-                            {el.subContent !== undefined && (
-                              <textarea
-                                value={el.subContent}
-                                onChange={(e) => onUpdateSelected({ subContent: e.target.value })}
-                                className="w-full flex-1 bg-stone-800 text-white px-2 py-1 rounded border border-amber-500 text-[11px]"
-                              />
-                            )}
-                          </div>
-                        ) : (el.type === 'tabs' || el.type === 'pure_f2u_tabs') && el.tabs ? (
-                          <div
-                            style={{
-                              backgroundColor: canvasEl.bgColor,
-                              color: canvasEl.textColor,
-                              borderColor: canvasEl.borderColor,
-                              borderWidth: canvasEl.borderWidth,
-                              borderStyle: canvasEl.borderStyle || 'solid',
-                              borderRadius: canvasEl.borderRadius,
-                              padding: canvasEl.padding,
-                              fontFamily: `${canvasEl.googleFont ? `'${canvasEl.googleFont}', ` : ''}${getFontFamilyCSS(canvasEl.fontFamily)}`,
-                            }}
-                            className="w-full h-full flex flex-col overflow-hidden"
-                          >
-                            <div className="font-bold text-xs mb-1.5">{el.content}</div>
-                            <div className="flex flex-wrap gap-1 border-b border-black/10 pb-1.5 mb-2">
-                              {el.tabs.map((tab, tIdx) => (
-                                <button
-                                  key={tab.id}
-                                  onClick={(e) => e.stopPropagation()}
-                                  onPointerDown={(e) => {
-                                    e.stopPropagation();
-                                    onSetActiveCanvasTabs((prev) => ({
-                                      ...prev,
-                                      [el.id]: tIdx,
-                                    }));
-                                    onSelectElement(el.id);
-                                  }}
-                                  style={
-                                    activeTabIdx === tIdx
-                                      ? { backgroundColor: el.borderColor, color: '#fff' }
-                                      : { backgroundColor: 'rgba(150,150,150,0.15)' }
-                                  }
-                                  className="px-2 py-0.5 rounded-[5px] text-[10px] font-mono transition"
-                                >
-                                  {tab.title}
-                                </button>
-                              ))}
-                            </div>
-                            <div className="text-xs opacity-90 whitespace-pre-line overflow-y-auto flex-1 leading-relaxed pointer-events-none">
-                              {el.tabs[activeTabIdx]?.content}
-                            </div>
-                          </div>
-                        ) : (
-                          <div
-                            className="w-full h-full pointer-events-none overflow-hidden"
-                            dangerouslySetInnerHTML={{
-                              __html: renderInnerElementHTML(
-                                {
-                                  ...el,
-                                  rotation:
-                                    el.type === 'pure_line' &&
-                                    isToyhouseFreePlatform &&
-                                    el.rotation &&
-                                    Math.round(el.rotation) % 90 !== 0
-                                      ? el.rotation
-                                      : 0,
-                                },
-                                platform.startsWith('toyhouse'),
-                                elements,
-                                false,
-                                isToyhouseFreePlatform
-                              ),
-                            }}
-                          />
-                        )}
-
-                        {isSelected && !el.locked && (selectedIds.length <= 1 || isPrimary) && (
-                          <>
-                            {RESIZE_HANDLES.map((h) => (
-                              <div
-                                key={h.dir}
-                                onClick={(e) => e.stopPropagation()}
-                                onPointerDown={(e) =>
-                                  onPointerDownElement(e, el, 'resize', h.dir)
-                                }
-                                style={{ backgroundColor: 'var(--accent)' }}
-                                className={`w-3 h-3 rounded-full border border-white absolute z-40 shadow ${h.cls}`}
-                              />
-                            ))}
-
-                            {(() => {
-                              const splitMod = (el.modifiers || []).find(
-                                (m): m is SplitModifier => m.kind === 'split' && m.enabled
-                              );
-                              if (!splitMod) return null;
-                              const isVert = splitMod.axis === 'vertical';
-                              return (
-                                <div
-                                  onClick={(e) => e.stopPropagation()}
-                                  onPointerDown={(e) => {
-                                    e.stopPropagation();
-                                    const parentRect = (
-                                      e.currentTarget.parentElement as HTMLElement
-                                    )?.getBoundingClientRect();
-                                    if (!parentRect) return;
-                                    onSetSplitDragState({
-                                      elementId: el.id,
-                                      modifierId: splitMod.id,
-                                      axis: splitMod.axis,
-                                      boxLeftPx: parentRect.left,
-                                      boxTopPx: parentRect.top,
-                                      boxW: parentRect.width,
-                                      boxH: parentRect.height,
-                                    });
-                                  }}
-                                  style={{
-                                    left: isVert ? `${splitMod.ratio}%` : '50%',
-                                    top: isVert ? '50%' : `${splitMod.ratio}%`,
-                                    backgroundColor: '#18181B',
-                                    color: '#FFFFFF',
-                                  }}
-                                  className={`absolute -translate-x-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded-full text-[9px] font-mono font-bold border border-white shadow-md z-50 select-none ${
-                                    isVert ? 'cursor-ew-resize' : 'cursor-ns-resize'
-                                  }`}
-                                  title="Drag to resize Split Pane Ratio %"
-                                >
-                                  {splitMod.ratio}%
-                                </div>
-                              );
-                            })()}
-                          </>
-                        )}
-                      </div>
+                        isSelectTool={canvasTool === 'select'}
+                        solvedCol={solvedColMap.get(el.id) ?? el.colSpan}
+                        activeTabIdx={activeCanvasTabs[el.id] || 0}
+                        onPointerDownElement={onPointerDownElement}
+                        onSelectElement={onSelectElement}
+                        onEnterContainerIsolation={onEnterContainerIsolation}
+                        onSetInlineEditId={onSetInlineEditId}
+                        onUpdateSelected={onUpdateSelected}
+                        onSetActiveCanvasTabs={onSetActiveCanvasTabs}
+                        onSetSplitDragState={onSetSplitDragState}
+                        onContextMenuElement={handleContextMenuElement}
+                      />
                     );
                   })}
 
@@ -1802,6 +1695,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                       <FloatingSelectionBar
                         el={selectedElement}
                         selectedElements={elements.filter((item) => selectedIds.includes(item.id))}
+                        resolvedOrigin={getElementCanvasOrigin(selectedElement, elements)}
                         swatches={swatches}
                         onUpdateSelected={onUpdateSelected}
                         onAdjustZIndex={onAdjustZIndex}
@@ -1818,6 +1712,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                   {/* Container Isolation Mode Children Overlay */}
                   {editingContainer &&
                     (() => {
+                      const containerOrigin = getElementCanvasOrigin(editingContainer, elements);
                       const { bL, bT } = getInnerBoxGeometry(editingContainer);
                       const activeSplitParent = (editingContainer.modifiers || []).find(
                         (m): m is SplitModifier => m.kind === 'split' && m.enabled
@@ -1839,8 +1734,8 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                                 <div
                                   key={`iso-pane-${pIdx}`}
                                   style={{
-                                    left: editingContainer.x + bL + pRect.paneX,
-                                    top: editingContainer.y + bT + pRect.paneY,
+                                    left: containerOrigin.x + bL + pRect.paneX,
+                                    top: containerOrigin.y + bT + pRect.paneY,
                                     width: pRect.paneW,
                                     height: pRect.paneH,
                                     zIndex: 72,
@@ -1871,8 +1766,8 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                             const oy = child.childOffsetY ?? 12;
                             const pIdx = child.parentPaneIndex ?? 0;
                             const pRect = getSplitPaneGeometry(editingContainer, pIdx);
-                            const cx = editingContainer.x + bL + pRect.paneX + ox;
-                            const cy = editingContainer.y + bT + pRect.paneY + oy;
+                            const cx = containerOrigin.x + bL + pRect.paneX + ox;
+                            const cy = containerOrigin.y + bT + pRect.paneY + oy;
                             const isChildSelected = selectedId === child.id;
                             const activeChildLink = getElementEffectiveLinkUrl(child);
                             return (
@@ -1896,18 +1791,24 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
                                   height: ch,
                                   zIndex: isChildSelected ? 80 : 75,
                                 }}
-                                className={`absolute cursor-move rounded-[5px] ${
+                                className={`absolute ${
+                                  child.locked ? 'cursor-not-allowed' : 'cursor-move'
+                                } rounded-[5px] ${
                                   isChildSelected
                                     ? 'ring-2 ring-amber-500 bg-amber-500/10'
                                     : 'border border-dashed border-amber-400/75 hover:border-amber-500'
                                 }`}
-                                title={`Child: ${child.label} (X:${ox}, Y:${oy})`}
+                                title={`Child: ${child.label} (X:${ox}, Y:${oy})${
+                                  child.locked ? ' · Locked' : ''
+                                }`}
                               >
                                 <div className="absolute -top-4 left-0 bg-amber-500 text-white text-[8.5px] font-mono px-1 rounded shadow pointer-events-none whitespace-nowrap">
+                                  {child.locked ? '🔒 ' : ''}
                                   {child.label} • X:{ox} Y:{oy}
                                   {activeSplitParent ? ` • P${pIdx + 1}` : ''}
                                 </div>
                                 {isChildSelected &&
+                                  !child.locked &&
                                   (['se', 'e', 's'] as const).map((dir) => (
                                     <div
                                       key={dir}
@@ -1989,7 +1890,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
               borderColor: 'var(--border-strong)',
               boxShadow: '0 8px 30px rgba(0,0,0,0.18)',
             }}
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[95] border rounded-lg px-2.5 py-1.5 max-w-[calc(100%-20px)] flex flex-wrap items-center justify-center gap-1.5 text-xs shadow-xl animate-in fade-in slide-in-from-bottom-2 duration-200"
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[95] border rounded-lg px-2.5 py-1.5 max-w-[calc(100%-20px)] flex flex-wrap items-center justify-center gap-1.5 text-xs shadow-xl dbx-fade-up"
           >
             <div className="flex items-center gap-1.5 font-mono text-[11px] font-semibold text-accent">
               <span

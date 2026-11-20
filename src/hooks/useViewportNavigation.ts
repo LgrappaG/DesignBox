@@ -10,6 +10,19 @@ export interface PanDragState {
   fromEmptyClick: boolean;
 }
 
+export interface CursorTrackState {
+  x: number;
+  y: number;
+  inside: boolean;
+}
+
+export interface CursorTracker {
+  get: () => CursorTrackState;
+  emit: (x: number, y: number, inside: boolean) => void;
+  setInside: (inside: boolean) => void;
+  subscribe: (listener: (state: CursorTrackState) => void) => () => void;
+}
+
 export interface UseViewportNavigationOptions {
   canvasWidth: number;
   canvasHeight: number;
@@ -35,10 +48,38 @@ export function useViewportNavigation({
   const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [viewportSize, setViewportSize] = useState<{ w: number; h: number }>({ w: 800, h: 600 });
   const [blockContentHeight, setBlockContentHeight] = useState<number>(canvasHeight);
-  const [cursorCoords, setCursorCoords] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [cursorInViewport, setCursorInViewport] = useState<boolean>(false);
   const [isSpacePressed, setIsSpacePressed] = useState<boolean>(false);
   const [panDrag, setPanDrag] = useState<PanDragState | null>(null);
+
+  const cursorStateRef = useRef<CursorTrackState>({ x: 0, y: 0, inside: false });
+  const cursorListenersRef = useRef<Set<(state: CursorTrackState) => void>>(new Set());
+  const cursorTrackerRef = useRef<CursorTracker | null>(null);
+  if (!cursorTrackerRef.current) {
+    cursorTrackerRef.current = {
+      get: () => cursorStateRef.current,
+      emit: (x: number, y: number, inside: boolean) => {
+        const prev = cursorStateRef.current;
+        if (prev.x === x && prev.y === y && prev.inside === inside) return;
+        const next: CursorTrackState = { x, y, inside };
+        cursorStateRef.current = next;
+        cursorListenersRef.current.forEach((listener) => listener(next));
+      },
+      setInside: (inside: boolean) => {
+        const prev = cursorStateRef.current;
+        if (prev.inside === inside) return;
+        const next: CursorTrackState = { ...prev, inside };
+        cursorStateRef.current = next;
+        cursorListenersRef.current.forEach((listener) => listener(next));
+      },
+      subscribe: (listener: (state: CursorTrackState) => void) => {
+        cursorListenersRef.current.add(listener);
+        return () => {
+          cursorListenersRef.current.delete(listener);
+        };
+      },
+    };
+  }
+  const cursorTracker = cursorTrackerRef.current;
 
   const effectiveCanvasHeight =
     layoutMode === 'block' ? Math.max(canvasHeight, blockContentHeight) : canvasHeight;
@@ -135,17 +176,31 @@ export function useViewportNavigation({
     setPanOffset({ x: 0, y: 0 });
   }, []);
 
-  const clientToCanvas = useCallback(
+  const clientToCanvasWithInside = useCallback(
     (clientX: number, clientY: number) => {
       const vpEl = canvasViewportRef.current;
-      if (!vpEl) return { x: 0, y: 0 };
+      if (!vpEl) return { x: 0, y: 0, inside: false };
       const vpRect = vpEl.getBoundingClientRect();
+      const inside =
+        clientX >= vpRect.left &&
+        clientX <= vpRect.right &&
+        clientY >= vpRect.top &&
+        clientY <= vpRect.bottom;
       return {
         x: Math.round((clientX - vpRect.left - canvasScreenLeft) / zoom),
         y: Math.round((clientY - vpRect.top - canvasScreenTop) / zoom),
+        inside,
       };
     },
     [canvasScreenLeft, canvasScreenTop, canvasViewportRef, zoom]
+  );
+
+  const clientToCanvas = useCallback(
+    (clientX: number, clientY: number) => {
+      const { x, y } = clientToCanvasWithInside(clientX, clientY);
+      return { x, y };
+    },
+    [clientToCanvasWithInside]
   );
 
   // Track viewport dimensions for synced rulers & bounded panning
@@ -223,10 +278,7 @@ export function useViewportNavigation({
     effectiveCanvasHeight,
     canvasScreenLeft,
     canvasScreenTop,
-    cursorCoords,
-    setCursorCoords,
-    cursorInViewport,
-    setCursorInViewport,
+    cursorTracker,
     isSpacePressed,
     setIsSpacePressed,
     panDrag,
@@ -236,6 +288,7 @@ export function useViewportNavigation({
     fitCanvasToView,
     centerCanvasView,
     clientToCanvas,
+    clientToCanvasWithInside,
   };
 }
 

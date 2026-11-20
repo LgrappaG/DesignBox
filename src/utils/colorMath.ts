@@ -1,3 +1,5 @@
+import { DesignElement, PreviewSurface } from '../types/schema';
+
 export interface RgbColor {
   r: number;
   g: number;
@@ -184,5 +186,243 @@ export function getContrastInk(color: string): '#18181B' | '#FFFFFF' {
   const { r, g, b } = hexToRgb(parsed.hex);
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   return luminance > 0.62 ? '#18181B' : '#FFFFFF';
+}
+
+export type WcagContrastLevel = 'AAA' | 'AA' | 'AA Large' | 'Fail';
+
+export interface WcagContrastResult {
+  ratio: number;
+  level: WcagContrastLevel;
+  passesAA: boolean;
+  effectiveFgHex: string;
+  effectiveBgHex: string;
+  usedFallbackBg: boolean;
+}
+
+export interface ToyhouseStressSurface {
+  id: PreviewSurface;
+  label: string;
+  bgHex: string;
+}
+
+export interface ToyhouseThemeContrastFailure {
+  id: string;
+  label: string;
+  ratio: number;
+  usedSurfaceBg: boolean;
+}
+
+export interface ToyhouseThemeContrastAudit {
+  surfaceId: PreviewSurface;
+  label: string;
+  bgHex: string;
+  checkedCount: number;
+  failingElements: ToyhouseThemeContrastFailure[];
+  minRatio: number | null;
+}
+
+export const TOYHOUSE_STRESS_SURFACES: ReadonlyArray<ToyhouseStressSurface> = [
+  { id: 'th_dark', label: 'TH Night', bgHex: '#16141C' },
+  { id: 'th_light', label: 'TH Light', bgHex: '#F4F5F7' },
+  { id: 'th_pink', label: 'TH Pink', bgHex: '#FDF3F7' },
+  { id: 'th_teal', label: 'TH Teal', bgHex: '#EDF6F7' },
+  { id: 'th_cute', label: 'TH Cute', bgHex: '#FFF6FB' },
+];
+
+const NON_TEXT_ELEMENT_TYPES = new Set<DesignElement['type']>([
+  'image',
+  'pure_image_slot',
+  'divider',
+  'pure_divider',
+  'pure_line',
+  'pure_circle',
+  'pure_ring',
+  'pure_diamond',
+  'pure_hexagon',
+  'pure_octagon',
+  'pure_star',
+  'spacer',
+  'sticker',
+  'pagedoll',
+  'fa_watermark',
+  'palette_strip',
+  'gallery',
+  'moodboard',
+]);
+
+/** Computes WCAG 2.1 sRGB relative luminance in [0, 1]. */
+export function getWcagRelativeLuminance(hex: string): number {
+  const { r, g, b } = hexToRgb(hex);
+  const linearize = (channel: number): number => {
+    const srgb = clamp(channel, 0, 255) / 255;
+    return srgb <= 0.03928 ? srgb / 12.92 : Math.pow((srgb + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b);
+}
+
+/** Computes WCAG 2.1 contrast ratio in [1, 21] between two opaque hex colors. */
+export function getWcagContrastRatio(fgHex: string, bgHex: string): number {
+  const l1 = getWcagRelativeLuminance(fgHex);
+  const l2 = getWcagRelativeLuminance(bgHex);
+  const bright = Math.max(l1, l2);
+  const dark = Math.min(l1, l2);
+  return Math.round(((bright + 0.05) / (dark + 0.05)) * 100) / 100;
+}
+
+/** Composites an arbitrarily alpha'd color string over an opaque fallback background hex. */
+export function compositeColorOverBg(
+  color: string | undefined,
+  fallbackHex = '#FAF8F5'
+): { hex: string; usedFallback: boolean } {
+  const normalizedFallback = normalizeHexColor(fallbackHex) || '#FAF8F5';
+  const parsed = parseColorValue(color, normalizedFallback);
+  if (parsed.isTransparent || parsed.alpha <= 0.001) {
+    return { hex: normalizedFallback, usedFallback: true };
+  }
+  if (parsed.alpha >= 0.995) {
+    return { hex: parsed.hex, usedFallback: false };
+  }
+  const fg = hexToRgb(parsed.hex);
+  const bg = hexToRgb(normalizedFallback);
+  const a = clamp(parsed.alpha, 0, 1);
+  return {
+    hex: rgbToHex({
+      r: fg.r * a + bg.r * (1 - a),
+      g: fg.g * a + bg.g * (1 - a),
+      b: fg.b * a + bg.b * (1 - a),
+    }),
+    usedFallback: true,
+  };
+}
+
+/** Evaluates WCAG 2.1 contrast of foreground text over fill (falling back to parent/canvas surface). */
+export function evaluateWcagContrast(
+  fgColor: string | undefined,
+  bgColor: string | undefined,
+  fallbackBgHex = '#FAF8F5',
+  fontSizePx = 13,
+  isBold = false
+): WcagContrastResult {
+  const effectiveBg = compositeColorOverBg(bgColor, fallbackBgHex);
+  const effectiveFg = compositeColorOverBg(fgColor, '#18181B');
+  const ratio = getWcagContrastRatio(effectiveFg.hex, effectiveBg.hex);
+  const isLargeText = fontSizePx >= 18 || (isBold && fontSizePx >= 14);
+  const aaThreshold = isLargeText ? 3.0 : 4.5;
+  const aaaThreshold = isLargeText ? 4.5 : 7.0;
+
+  let level: WcagContrastLevel = 'Fail';
+  if (ratio >= aaaThreshold) {
+    level = 'AAA';
+  } else if (ratio >= 4.5) {
+    level = 'AA';
+  } else if (ratio >= aaThreshold) {
+    level = 'AA Large';
+  }
+
+  return {
+    ratio,
+    level,
+    passesAA: ratio >= aaThreshold,
+    effectiveFgHex: effectiveFg.hex,
+    effectiveBgHex: effectiveBg.hex,
+    usedFallbackBg: effectiveBg.usedFallback,
+  };
+}
+
+/** Picks dark charcoal (#18181B) or soft ivory (#FAF8F5) whichever maximizes contrast on bgColor. */
+export function suggestAccessibleTextColor(
+  bgColor: string | undefined,
+  fallbackBgHex = '#FAF8F5'
+): string {
+  const effectiveBg = compositeColorOverBg(bgColor, fallbackBgHex).hex;
+  const darkRatio = getWcagContrastRatio('#18181B', effectiveBg);
+  const lightRatio = getWcagContrastRatio('#FAF8F5', effectiveBg);
+  return darkRatio >= lightRatio ? '#18181B' : '#FAF8F5';
+}
+
+function elementHasAuditableText(el: DesignElement): boolean {
+  if (el.hidden || NON_TEXT_ELEMENT_TYPES.has(el.type)) return false;
+  if ((el.content || '').trim().length > 0 || (el.subContent || '').trim().length > 0) {
+    return true;
+  }
+  return Boolean(
+    (el.tabs && el.tabs.length > 0) ||
+      (el.kvItems && el.kvItems.length > 0) ||
+      (el.inventoryItems && el.inventoryItems.length > 0) ||
+      (el.timelineMilestones && el.timelineMilestones.length > 0) ||
+      (el.relationNodes && el.relationNodes.length > 0)
+  );
+}
+
+/** Resolves effective opaque background color for a nested element by walking its parent chain. */
+export function resolveElementEffectiveBackdrop(
+  el: DesignElement,
+  byId: ReadonlyMap<string, DesignElement>,
+  canvasBg: string,
+  surfaceHex: string
+): string {
+  const effectiveCanvas = compositeColorOverBg(canvasBg, surfaceHex).hex;
+  const chain: DesignElement[] = [];
+  const visited = new Set<string>([el.id]);
+  let curId = el.parentId;
+  while (curId && !visited.has(curId)) {
+    visited.add(curId);
+    const parent = byId.get(curId);
+    if (!parent) break;
+    chain.push(parent);
+    curId = parent.parentId;
+  }
+  let backdrop = effectiveCanvas;
+  for (let i = chain.length - 1; i >= 0; i--) {
+    backdrop = compositeColorOverBg(chain[i].bgColor, backdrop).hex;
+  }
+  return backdrop;
+}
+
+/** Audits visible text-bearing elements for WCAG AA contrast across all 5 Toyhouse community themes. */
+export function auditElementsAcrossToyhouseThemes(
+  elements: ReadonlyArray<DesignElement>,
+  canvasBg: string,
+  cuteBgHex = '#FFF6FB'
+): ToyhouseThemeContrastAudit[] {
+  const byId = new Map<string, DesignElement>(elements.map((e) => [e.id, e]));
+  const auditable = elements.filter(elementHasAuditableText);
+
+  return TOYHOUSE_STRESS_SURFACES.map((surf) => {
+    const surfaceBg = surf.id === 'th_cute' ? normalizeHexColor(cuteBgHex) || surf.bgHex : surf.bgHex;
+    const failingElements: ToyhouseThemeContrastFailure[] = [];
+    let minRatio: number | null = null;
+
+    for (const el of auditable) {
+      const backdropHex = resolveElementEffectiveBackdrop(el, byId, canvasBg, surfaceBg);
+      const contrast = evaluateWcagContrast(
+        el.textColor,
+        el.bgColor,
+        backdropHex,
+        el.fontSize || 13,
+        el.fontWeight === 'bold'
+      );
+      if (minRatio === null || contrast.ratio < minRatio) {
+        minRatio = contrast.ratio;
+      }
+      if (!contrast.passesAA) {
+        failingElements.push({
+          id: el.id,
+          label: el.label,
+          ratio: contrast.ratio,
+          usedSurfaceBg: contrast.usedFallbackBg,
+        });
+      }
+    }
+
+    return {
+      surfaceId: surf.id,
+      label: surf.label,
+      bgHex: surfaceBg,
+      checkedCount: auditable.length,
+      failingElements,
+      minRatio,
+    };
+  });
 }
 

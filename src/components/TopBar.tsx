@@ -23,6 +23,7 @@ import {
   RotateCcw,
   Rows3,
   Save,
+  Search,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -55,11 +56,13 @@ export interface TopBarProps {
   onOpenObjectForge: () => void;
   onOpenHtmlImporter: () => void;
   onOpenTemplates: () => void;
+  onOpenSpotlight: () => void;
   onOpenProject: () => void;
   onOpenRecentProject: (path: string) => void;
   onRestoreSnapshot: (id: string) => void;
   onSaveProject: () => void;
   onSaveProjectAs: () => void;
+  onExportHtml: () => void;
   onOpenShortcuts: () => void;
   onOpenSettings: () => void;
   onResetWorkspaceLayout: () => void;
@@ -73,7 +76,7 @@ export interface TopBarProps {
   onCopyCode: () => void;
 }
 
-export const TopBar: React.FC<TopBarProps> = ({
+export const TopBar: React.FC<TopBarProps> = React.memo(({
   projectName,
   currentFilePath,
   isDirty,
@@ -92,11 +95,13 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenObjectForge,
   onOpenHtmlImporter,
   onOpenTemplates,
+  onOpenSpotlight,
   onOpenProject,
   onOpenRecentProject,
   onRestoreSnapshot,
   onSaveProject,
   onSaveProjectAs,
+  onExportHtml,
   onOpenShortcuts,
   onOpenSettings,
   onResetWorkspaceLayout,
@@ -109,15 +114,15 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenPreview,
   onCopyCode,
 }) => {
-  const [recentMenuOpen, setRecentMenuOpen] = useState(false);
-  const recentMenuRef = useRef<HTMLDivElement | null>(null);
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const fileMenuRef = useRef<HTMLDivElement | null>(null);
   const inTauri = isTauriRuntime();
 
   useEffect(() => {
-    if (!recentMenuOpen) return;
+    if (!fileMenuOpen) return;
     const onDocDown = (e: MouseEvent) => {
-      if (recentMenuRef.current && !recentMenuRef.current.contains(e.target as Node)) {
-        setRecentMenuOpen(false);
+      if (fileMenuRef.current && !fileMenuRef.current.contains(e.target as Node)) {
+        setFileMenuOpen(false);
       }
     };
     const onKeyDown = (e: KeyboardEvent) => {
@@ -125,7 +130,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        setRecentMenuOpen(false);
+        setFileMenuOpen(false);
       }
     };
     window.addEventListener('mousedown', onDocDown);
@@ -134,14 +139,20 @@ export const TopBar: React.FC<TopBarProps> = ({
       window.removeEventListener('mousedown', onDocDown);
       window.removeEventListener('keydown', onKeyDown, true);
     };
-  }, [recentMenuOpen]);
+  }, [fileMenuOpen]);
+
+  const runMenuAction = (fn: () => void) => {
+    setFileMenuOpen(false);
+    fn();
+  };
 
   return (
     <header
       style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-main)' }}
       className="min-h-11 py-1.5 border-b px-2.5 flex flex-wrap xl:flex-nowrap items-center justify-between gap-x-2 gap-y-1.5 shrink-0 relative z-40"
     >
-      <div className="flex items-center flex-wrap gap-1 min-w-0">
+      {/* Left: Brand, File Menu, Search & Save Status */}
+      <div className="flex items-center flex-wrap gap-1.5 min-w-0">
         <div
           style={
             uiTheme === 'cute'
@@ -158,237 +169,303 @@ export const TopBar: React.FC<TopBarProps> = ({
           <span>DBX</span>
           {uiTheme === 'cute' && <span className="text-[10px] leading-none">♡</span>}
         </div>
-        <div className="flex items-center gap-1 min-w-0">
-          <span className="font-semibold text-xs tracking-tight shrink-0 hidden sm:inline">DesignBox</span>
-          <span
-            title={currentFilePath || 'Unsaved active workspace (stored in autosave)'}
-            style={{ color: 'var(--text-muted)' }}
-            className="text-[10px] font-mono truncate max-w-[115px] hidden 2xl:inline"
-          >
-            · {projectName}
-            {isDirty ? '*' : ''}
-          </span>
-        </div>
 
-        <div style={{ backgroundColor: 'var(--border-main)' }} className="h-4 w-px mx-0.5 shrink-0 hidden sm:block" />
-
-        <button
-          onClick={onNewBlankCanvas}
-          style={{
-            backgroundColor: 'var(--bg-panel-alt)',
-            borderColor: 'var(--border-strong)',
-          }}
-          className="flex items-center gap-1 px-2 py-1 rounded-[7px] text-xs font-medium border hover:opacity-90 transition shrink-0"
-          title="Start with a fresh blank canvas"
-        >
-          <FilePlus2 className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
-          <span className="hidden xl:inline">Blank</span>
-        </button>
-
-        <button
-          onClick={onOpenObjectForge}
-          style={{
-            backgroundColor: 'var(--accent-soft)',
-            borderColor: 'var(--accent)',
-          }}
-          className="flex items-center gap-1 px-2 py-1 rounded-[7px] text-xs font-semibold border hover:opacity-90 transition shrink-0"
-          title="Object Forge"
-        >
-          <Cpu className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
-          <span>+ Forge</span>
-        </button>
-
-        <button
-          onClick={onOpenHtmlImporter}
-          style={{
-            backgroundColor: 'var(--bg-panel-alt)',
-            borderColor: 'var(--border-strong)',
-          }}
-          className="flex items-center gap-1 px-2 py-1 rounded-[7px] text-xs font-medium border hover:opacity-90 transition shrink-0"
-          title="Import Toyhouse HTML markup into editable blocks & custom widgets"
-        >
-          <FileCode2 className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
-          <span className="hidden 2xl:inline">Import HTML</span>
-        </button>
-
-        <button
-          onClick={onOpenTemplates}
-          style={{
-            backgroundColor: 'var(--bg-panel-alt)',
-            borderColor: 'var(--border-strong)',
-          }}
-          className="flex items-center gap-1 px-2 py-1 rounded-[7px] text-xs font-medium border hover:opacity-90 transition shrink-0"
-          title="Presets & Templates"
-        >
-          <LayoutTemplate className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
-          <span className="hidden xl:inline">Presets</span>
-        </button>
-
-        <div className="relative flex items-center shrink-0" ref={recentMenuRef}>
-          <button
-            onClick={onOpenProject}
-            className="flex items-center gap-1 px-1.5 py-1 rounded-l-[6px] text-xs hover:opacity-80"
-            title="Open .dbx.json project (Ctrl+O)"
-          >
-            <FolderOpen className="w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />
-            <span className="hidden xl:inline">Open</span>
-          </button>
+        {/* Figma-style File ▾ Dropdown Menu */}
+        <div className="relative shrink-0" ref={fileMenuRef}>
           <button
             type="button"
-            onClick={() => setRecentMenuOpen((v) => !v)}
-            className="px-1 py-1 rounded-r-[6px] hover:opacity-80"
-            title="Recent Projects & Local Snapshots"
+            onClick={() => setFileMenuOpen((v) => !v)}
+            style={
+              fileMenuOpen
+                ? {
+                    backgroundColor: 'var(--accent-soft)',
+                    borderColor: 'var(--accent)',
+                    color: 'var(--accent)',
+                  }
+                : {
+                    backgroundColor: 'var(--bg-panel-alt)',
+                    borderColor: 'var(--border-strong)',
+                  }
+            }
+            className="flex items-center gap-1 px-2.5 py-1 rounded-[7px] text-xs font-semibold border hover:opacity-90 transition"
+            title="File, Templates, Import/Export & Studio Preferences"
           >
-            <ChevronDown className="w-3 h-3" style={{ color: 'var(--text-muted)' }} />
+            <span>File</span>
+            <ChevronDown className="w-3 h-3 opacity-80" />
           </button>
 
-          {recentMenuOpen && (
+          {fileMenuOpen && (
             <div
               style={{
                 backgroundColor: 'var(--bg-panel)',
                 borderColor: 'var(--border-strong)',
               }}
-              className="absolute left-0 top-full mt-1.5 w-72 border rounded-[10px] shadow-2xl p-2.5 space-y-2.5 z-50"
+              className="absolute left-0 top-full mt-1.5 w-80 border rounded-[10px] shadow-2xl p-2 space-y-1.5 z-50 text-xs"
             >
-              <div>
-                <div
-                  style={{ color: 'var(--text-muted)' }}
-                  className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 mb-1"
-                >
-                  <FolderClock className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-                  <span>Recent Projects</span>
-                </div>
-                {recentProjects.length === 0 ? (
-                  <p style={{ color: 'var(--text-muted)' }} className="text-[10px] italic px-1">
-                    {inTauri
-                      ? 'No opened or saved .dbx.json files yet.'
-                      : 'Native file history is tracked in desktop mode.'}
-                  </p>
-                ) : (
-                  <div className="space-y-1 max-h-36 overflow-y-auto">
-                    {recentProjects.map((rp) => (
-                      <button
-                        key={rp.path}
-                        type="button"
-                        disabled={!rp.exists}
-                        onClick={() => {
-                          setRecentMenuOpen(false);
-                          onOpenRecentProject(rp.path);
-                        }}
-                        style={{
-                          backgroundColor: 'var(--bg-input)',
-                          borderColor: 'var(--border-main)',
-                        }}
-                        className="w-full text-left px-2 py-1 rounded-[5px] border text-[11px] flex items-center justify-between gap-2 hover:border-amber-600 disabled:opacity-45"
-                        title={rp.path}
-                      >
-                        <span className="truncate font-medium">{rp.name}</span>
-                        <span style={{ color: 'var(--text-muted)' }} className="text-[9px] font-mono shrink-0">
-                          {rp.exists ? new Date(rp.updatedAtMs).toLocaleDateString() : 'Missing'}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={() => runMenuAction(onOpenTemplates)}
+                className="w-full px-2.5 py-1.5 rounded-[6px] flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5 font-semibold"
+              >
+                <span className="flex items-center gap-2">
+                  <LayoutTemplate className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
+                  <span>Starter Hub &amp; Templates…</span>
+                </span>
+                <span style={{ color: 'var(--text-muted)' }} className="text-[10px] font-mono">
+                  Toyhouse
+                </span>
+              </button>
 
-              <div className="border-t pt-2" style={{ borderColor: 'var(--border-main)' }}>
-                <div
-                  style={{ color: 'var(--text-muted)' }}
-                  className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 mb-1"
-                >
-                  <History className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-                  <span>Local Recovery Snapshots</span>
-                </div>
-                {localSnapshots.length === 0 ? (
-                  <p style={{ color: 'var(--text-muted)' }} className="text-[10px] italic px-1">
-                    Auto-snapshots are captured every 60s when dirty.
-                  </p>
-                ) : (
-                  <div className="space-y-1 max-h-36 overflow-y-auto">
-                    {localSnapshots.slice(0, 6).map((snap) => (
-                      <button
-                        key={snap.id}
-                        type="button"
-                        onClick={() => {
-                          setRecentMenuOpen(false);
-                          onRestoreSnapshot(snap.id);
-                        }}
-                        style={{
-                          backgroundColor: 'var(--bg-input)',
-                          borderColor: 'var(--border-main)',
-                        }}
-                        className="w-full text-left px-2 py-1 rounded-[5px] border text-[11px] flex items-center justify-between gap-2 hover:border-amber-600"
+              <button
+                type="button"
+                onClick={() => runMenuAction(onNewBlankCanvas)}
+                className="w-full px-2.5 py-1.5 rounded-[6px] flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                <span className="flex items-center gap-2">
+                  <FilePlus2 className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
+                  <span>New Blank Canvas</span>
+                </span>
+              </button>
+
+              <div className="border-t my-1" style={{ borderColor: 'var(--border-main)' }} />
+
+              <button
+                type="button"
+                onClick={() => runMenuAction(onOpenProject)}
+                className="w-full px-2.5 py-1.5 rounded-[6px] flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                <span className="flex items-center gap-2">
+                  <FolderOpen className="w-3.5 h-3.5 opacity-80" />
+                  <span>Open Project…</span>
+                </span>
+                <kbd style={{ color: 'var(--text-muted)' }} className="text-[9.5px] font-mono">
+                  Ctrl+O
+                </kbd>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => runMenuAction(onSaveProject)}
+                className="w-full px-2.5 py-1.5 rounded-[6px] flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                <span className="flex items-center gap-2">
+                  <Save className="w-3.5 h-3.5 opacity-80" />
+                  <span>Save Project</span>
+                </span>
+                <kbd style={{ color: 'var(--text-muted)' }} className="text-[9.5px] font-mono">
+                  Ctrl+S
+                </kbd>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => runMenuAction(onSaveProjectAs)}
+                className="w-full px-2.5 py-1.5 rounded-[6px] flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                <span className="flex items-center gap-2">
+                  <Download className="w-3.5 h-3.5 opacity-80" />
+                  <span>Save Project As…</span>
+                </span>
+                <kbd style={{ color: 'var(--text-muted)' }} className="text-[9.5px] font-mono">
+                  Ctrl+Shift+S
+                </kbd>
+              </button>
+
+              <div className="border-t my-1" style={{ borderColor: 'var(--border-main)' }} />
+
+              <button
+                type="button"
+                onClick={() => runMenuAction(onOpenHtmlImporter)}
+                className="w-full px-2.5 py-1.5 rounded-[6px] flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                <span className="flex items-center gap-2">
+                  <FileCode2 className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
+                  <span>Import Toyhouse HTML…</span>
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => runMenuAction(onExportHtml)}
+                className="w-full px-2.5 py-1.5 rounded-[6px] flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                <span className="flex items-center gap-2">
+                  <Download className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>Export Standalone .HTML</span>
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => runMenuAction(onOpenObjectForge)}
+                className="w-full px-2.5 py-1.5 rounded-[6px] flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                <span className="flex items-center gap-2">
+                  <Cpu className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
+                  <span>Object Forge (Custom Widgets)…</span>
+                </span>
+              </button>
+
+              {(recentProjects.length > 0 || localSnapshots.length > 0) && (
+                <div className="border-t pt-1.5 mt-1 space-y-2" style={{ borderColor: 'var(--border-main)' }}>
+                  {recentProjects.length > 0 && (
+                    <div>
+                      <div
+                        style={{ color: 'var(--text-muted)' }}
+                        className="px-2 text-[9.5px] font-bold uppercase tracking-wider flex items-center gap-1.5 mb-1"
                       >
-                        <span className="truncate flex items-center gap-1">
-                          <Clock className="w-3 h-3 opacity-60 shrink-0" />
-                          {snap.projectName}
-                        </span>
-                        <span style={{ color: 'var(--text-muted)' }} className="text-[9px] font-mono shrink-0">
-                          {new Date(snap.createdAtMs).toLocaleTimeString()}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+                        <FolderClock className="w-3 h-3" style={{ color: 'var(--accent)' }} />
+                        <span>Recent Projects</span>
+                      </div>
+                      <div className="space-y-0.5 max-h-28 overflow-y-auto px-1">
+                        {recentProjects.slice(0, 6).map((rp) => (
+                          <button
+                            key={rp.path}
+                            type="button"
+                            disabled={!rp.exists}
+                            onClick={() => runMenuAction(() => onOpenRecentProject(rp.path))}
+                            style={{
+                              backgroundColor: 'var(--bg-input)',
+                              borderColor: 'var(--border-main)',
+                            }}
+                            className="w-full text-left px-2 py-1 rounded-[5px] border text-[10.5px] flex items-center justify-between gap-2 hover:border-[var(--accent)] disabled:opacity-45"
+                            title={rp.path}
+                          >
+                            <span className="truncate font-medium">{rp.name}</span>
+                            <span style={{ color: 'var(--text-muted)' }} className="text-[9px] font-mono shrink-0">
+                              {rp.exists ? new Date(rp.updatedAtMs).toLocaleDateString() : 'Missing'}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {localSnapshots.length > 0 && (
+                    <div>
+                      <div
+                        style={{ color: 'var(--text-muted)' }}
+                        className="px-2 text-[9.5px] font-bold uppercase tracking-wider flex items-center gap-1.5 mb-1"
+                      >
+                        <History className="w-3 h-3" style={{ color: 'var(--accent)' }} />
+                        <span>Recovery Snapshots</span>
+                      </div>
+                      <div className="space-y-0.5 max-h-24 overflow-y-auto px-1">
+                        {localSnapshots.slice(0, 4).map((snap) => (
+                          <button
+                            key={snap.id}
+                            type="button"
+                            onClick={() => runMenuAction(() => onRestoreSnapshot(snap.id))}
+                            style={{
+                              backgroundColor: 'var(--bg-input)',
+                              borderColor: 'var(--border-main)',
+                            }}
+                            className="w-full text-left px-2 py-1 rounded-[5px] border text-[10.5px] flex items-center justify-between gap-2 hover:border-[var(--accent)]"
+                          >
+                            <span className="truncate flex items-center gap-1">
+                              <Clock className="w-3 h-3 opacity-60 shrink-0" />
+                              {snap.projectName}
+                            </span>
+                            <span style={{ color: 'var(--text-muted)' }} className="text-[9px] font-mono shrink-0">
+                              {new Date(snap.createdAtMs).toLocaleTimeString()}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!recentProjects.length && !localSnapshots.length && (
+                <div className="border-t pt-1.5 px-2 text-[10px]" style={{ borderColor: 'var(--border-main)', color: 'var(--text-muted)' }}>
+                  {inTauri
+                    ? 'Recent files & snapshots appear here automatically.'
+                    : 'Recovery snapshots save automatically as you edit.'}
+                </div>
+              )}
+
+              <div className="border-t my-1" style={{ borderColor: 'var(--border-main)' }} />
+
+              <button
+                type="button"
+                onClick={() => runMenuAction(onOpenShortcuts)}
+                className="w-full px-2.5 py-1.5 rounded-[6px] flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                <Keyboard className="w-3.5 h-3.5 opacity-80" />
+                <span>Keyboard Shortcuts</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => runMenuAction(onOpenSettings)}
+                className="w-full px-2.5 py-1.5 rounded-[6px] flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                <Settings className="w-3.5 h-3.5 opacity-80" />
+                <span>Studio Settings &amp; Hosting…</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => runMenuAction(onResetWorkspaceLayout)}
+                className="w-full px-2.5 py-1.5 rounded-[6px] flex items-center gap-2 hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                <RotateCcw className="w-3.5 h-3.5 opacity-80" />
+                <span>Reset Workspace Layout</span>
+              </button>
             </div>
           )}
         </div>
 
-        <button
-          onClick={onSaveProject}
-          style={saveNotice ? { backgroundColor: 'var(--accent)', color: '#fff' } : undefined}
-          className="flex items-center gap-1 px-1.5 py-1 rounded-[6px] text-xs hover:opacity-80 transition shrink-0"
-          title={
-            currentFilePath
-              ? `Save (${currentFilePath}) · Ctrl+S`
-              : 'Save project (.dbx.json) · Ctrl+S'
-          }
-        >
-          {saveNotice ? (
-            <Check className="w-3.5 h-3.5" />
-          ) : (
-            <Save className="w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />
-          )}
-          <span className="hidden xl:inline">{saveNotice ? 'Saved!' : 'Save'}</span>
-        </button>
-
-        <button
-          onClick={onSaveProjectAs}
-          className="p-1 rounded-[6px] hover:opacity-80 shrink-0"
-          title="Save Project As... (Ctrl+Shift+S)"
-        >
-          <Download className="w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />
-        </button>
-
-        <button
-          onClick={onOpenShortcuts}
-          className="p-1 rounded-[6px] hover:opacity-80 shrink-0"
-          title="Keyboard Shortcuts"
-        >
-          <Keyboard className="w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />
-        </button>
-
-        <button
-          onClick={onOpenSettings}
-          className="p-1 rounded-[6px] hover:opacity-80 shrink-0"
-          title="ImgBB API Key, Snapshots & Preferences"
-        >
-          <Settings className="w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />
-        </button>
-
+        {/* Quick Command Search (Ctrl+K) */}
         <button
           type="button"
-          onClick={onResetWorkspaceLayout}
-          className="p-1 rounded-[6px] hover:opacity-80 shrink-0"
-          title="Reset Panel Layout & Center View"
+          onClick={onOpenSpotlight}
+          style={{
+            backgroundColor: 'var(--bg-input)',
+            borderColor: 'var(--border-strong)',
+            color: 'var(--text-muted)',
+          }}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-[7px] border text-[11px] hover:border-[var(--accent)] transition shrink-0"
+          title="Quick-Add Elements, Widgets, Icons & Assets (/ or Ctrl+K)"
         >
-          <RotateCcw className="w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />
+          <Search className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
+          <span className="hidden md:inline">Search</span>
+          <kbd className="text-[9.5px] font-mono px-1 rounded bg-black/10 dark:bg-white/10">
+            Ctrl+K
+          </kbd>
+        </button>
+
+        {/* Project Name & Quick Save */}
+        <button
+          type="button"
+          onClick={onSaveProject}
+          style={
+            saveNotice
+              ? { backgroundColor: 'rgba(16, 185, 129, 0.16)', borderColor: 'rgba(16, 185, 129, 0.4)', color: '#10B981' }
+              : { color: 'var(--text-muted)', borderColor: 'transparent' }
+          }
+          className="flex items-center gap-1.5 px-2 py-1 rounded-[6px] border text-[11px] font-mono hover:bg-black/5 dark:hover:bg-white/5 transition min-w-0 max-w-[200px]"
+          title={currentFilePath ? `${currentFilePath} · Click to Save (Ctrl+S)` : 'Click to Save Project (Ctrl+S)'}
+        >
+          {saveNotice ? (
+            <>
+              <Check className="w-3 h-3 shrink-0" />
+              <span className="truncate font-sans font-medium">{saveNotice}</span>
+            </>
+          ) : (
+            <>
+              <Save className="w-3 h-3 shrink-0 opacity-75" />
+              <span className="truncate">
+                {projectName}
+                {isDirty ? '*' : ''}
+              </span>
+            </>
+          )}
         </button>
       </div>
 
-      {/* Center: 3 Layout Modes Switcher (Freeform Collage Primary) */}
+      {/* Center: 3 Layout Modes Switcher */}
       <div
         style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}
         className="flex items-center p-0.5 rounded-[8px] border shrink-0 max-w-full overflow-x-auto"
@@ -460,7 +537,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           )}
         </button>
 
-        {/* Clean 2-way F2U vs Pro Segmented Switch */}
+        {/* Clean 2-way Toyhouse F2U vs Premium Segmented Switch */}
         {(() => {
           const isF2U = platform === 'toyhouse_free' || platform === 'toyhouse_oc';
           return (
@@ -470,9 +547,9 @@ export const TopBar: React.FC<TopBarProps> = ({
               title={
                 isF2U
                   ? shieldedElementCount > 0
-                    ? `F2U Free Mode active: ${shieldedElementCount} element(s) have Pro effects safely adapted without losing settings.`
-                    : 'F2U Free Mode: 100% Toyhouse Free compliant (zero <style> tags)'
-                  : 'Pro CSS Mode: <style> blocks, custom animations, glass blur & clip-path enabled'
+                    ? `Toyhouse F2U Free Mode active: ${shieldedElementCount} element(s) have Pro effects safely masked without losing settings.`
+                    : 'Toyhouse F2U Free Mode: 100% Toyhouse Free compliant (zero <style> tags)'
+                  : 'Toyhouse Premium Mode: <style> blocks, custom animations, glass blur & clip-path enabled'
               }
             >
               <button
@@ -490,10 +567,10 @@ export const TopBar: React.FC<TopBarProps> = ({
                 className="flex items-center gap-1 px-2 py-1 rounded-[6px] border text-[11px] font-bold transition whitespace-nowrap"
               >
                 <ShieldCheck className="w-3 h-3 shrink-0" />
-                <span>F2U</span>
+                <span>TH F2U</span>
                 {isF2U && shieldedElementCount > 0 && (
                   <span className="ml-0.5 px-1 py-0 rounded bg-amber-500/20 text-amber-600 dark:text-amber-300 font-mono text-[9.5px]">
-                    · {shieldedElementCount} adapted
+                    · {shieldedElementCount} masked
                   </span>
                 )}
               </button>
@@ -512,7 +589,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 className="flex items-center gap-1 px-2 py-1 rounded-[6px] border text-[11px] font-bold transition whitespace-nowrap"
               >
                 <Sparkles className="w-3 h-3 shrink-0" />
-                <span>Pro</span>
+                <span>TH Pro</span>
               </button>
             </div>
           );
@@ -569,7 +646,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             borderColor: 'var(--border-strong)',
           }}
           className="flex items-center gap-1 px-2 py-1 rounded-[7px] border text-[11px] font-medium hover:opacity-90 shrink-0"
-          title="Interactive Live Preview"
+          title="Interactive Toyhouse Live Preview & Contrast Stress-Test"
         >
           <Eye className="w-3.5 h-3.5" />
           <span className="hidden md:inline">Preview</span>
@@ -579,7 +656,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           onClick={onCopyCode}
           style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
           className="flex items-center gap-1 px-2.5 py-1 rounded-[7px] text-[11px] font-semibold hover:opacity-95 transition shrink-0"
-          title="Copy Generated HTML"
+          title="Copy Generated Toyhouse HTML"
         >
           {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
           <span>{copied ? 'Copied' : 'Copy'}</span>
@@ -587,5 +664,4 @@ export const TopBar: React.FC<TopBarProps> = ({
       </div>
     </header>
   );
-};
-
+});

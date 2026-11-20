@@ -198,7 +198,7 @@ export const InteractionsAndMotionSection: React.FC<InteractionsAndMotionSection
 
           {isToyhouseFree && el.hoverAction && el.hoverAction !== 'none' && (
             <div className="text-[9px] text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded px-2 py-1">
-              Image CSS :hover actions require Toyhouse Premium / Carrd Pro.
+              Image CSS :hover actions require Toyhouse Premium.
             </div>
           )}
 
@@ -349,7 +349,7 @@ export const InteractionsAndMotionSection: React.FC<InteractionsAndMotionSection
         {isToyhouseFree && el.hoverEffect !== 'none' && (
           <div className="text-[9.5px] text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-[6px] px-2 py-1.5 leading-snug">
             CSS <code>:hover</code> effects ({el.hoverEffect}) require{' '}
-            <strong>Toyhouse Premium / Carrd Pro</strong>. On Toyhouse Free (F2U), use{' '}
+            <strong>Toyhouse Premium</strong>. On Toyhouse Free (F2U), use{' '}
             <strong>Hover Tooltip</strong> below or <strong>Collapsible Box</strong> above.
           </div>
         )}

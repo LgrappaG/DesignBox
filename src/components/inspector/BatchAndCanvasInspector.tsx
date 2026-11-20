@@ -23,7 +23,7 @@ export const CANVAS_SIZE_PRESETS: ReadonlyArray<{ id: string; label: string; w: 
   { id: 'standard', label: 'Standard Freeform (760×540)', w: 760, h: 540 },
   { id: 'compact', label: 'Compact Character Card (600×420)', w: 600, h: 420 },
   { id: 'wide', label: 'Wide World / Banner (900×640)', w: 900, h: 640 },
-  { id: 'carrd_mobile', label: 'Tall Carrd Mobile (480×860)', w: 480, h: 860 },
+  { id: 'mobile_portrait', label: 'Mobile Portrait (480×860)', w: 480, h: 860 },
   { id: 'square', label: 'Square Showcase (640×640)', w: 640, h: 640 },
   { id: 'scene', label: 'Full Scene Sheet (1000×720)', w: 1000, h: 720 },
 ];

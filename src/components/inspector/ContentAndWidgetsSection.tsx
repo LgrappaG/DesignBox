@@ -28,7 +28,9 @@ import {
   ImageBlendMode,
   ImageFrameStyle,
   ImageShape,
+  InventoryItem,
   CharacterRelationNode,
+  TimelineMilestone,
 } from '../../types/schema';
 import {
   getFontAwesomeFlipClass,
@@ -97,7 +99,108 @@ const SUBCONTENT_EXCLUDED_TYPES = new Set([
   'tabs',
   'gallery',
   'moodboard',
+  'stat_bar',
+  'pure_progress',
+  'kv_table',
+  'id_card',
+  'rpg_stats',
+  'social_links',
+  'inventory',
+  'timeline',
 ]);
+
+const DEFAULT_INVENTORY_ITEMS: InventoryItem[] = [
+  { id: 'inv-0', name: 'Brass Astrolabe', count: 1, rarity: 'epic', icon: '🧭' },
+  { id: 'inv-1', name: 'Star-Chart Map', count: 1, rarity: 'rare', icon: '📜' },
+  { id: 'inv-2', name: 'Crystal Prism', count: 4, rarity: 'rare', icon: '💎' },
+  { id: 'inv-3', name: 'Lapis Ink Bottle', count: 2, rarity: 'common', icon: '🧪' },
+  { id: 'inv-4', name: 'Rift Key #07', count: 1, rarity: 'legendary', icon: '🗝' },
+  { id: 'inv-5', name: 'Empty Slot', count: 0, rarity: 'common', icon: '✦' },
+];
+
+const DEFAULT_TIMELINE_MILESTONES: TimelineMilestone[] = [
+  { id: 'tm-0', year: 'AGE 07', title: 'The Great Tidal Eclipse', description: 'Discovered the first resonant brass gear washed up on the rocky shores.' },
+  { id: 'tm-1', year: 'AGE 14', title: 'Oak Observatory', description: 'Apprenticed under Grand Astrologer Vance; mapped 12 new constellations.' },
+  { id: 'tm-2', year: 'AGE 21', title: 'The Void Rift Incident', description: 'The astrolabe shattered during the midnight alignment, opening the northern rift.' },
+];
+
+function parseColonPairs(raw: string | undefined, fallbackText: string): Array<{ key: string; value: string }> {
+  const source = (raw && raw.trim()) ? raw : fallbackText;
+  return source
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+    .map((line) => {
+      const idx = line.indexOf(':');
+      if (idx === -1) return { key: line.trim(), value: '' };
+      return { key: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim() };
+    });
+}
+
+function serializeColonPairs(rows: ReadonlyArray<{ key: string; value: string }>): string {
+  return rows.map((r) => `${r.key.replace(/:/g, '').trim() || 'Field'}: ${r.value}`).join('\n');
+}
+
+function parsePipeLinks(raw: string | undefined): Array<{ label: string; url: string }> {
+  const source = (raw && raw.trim())
+    ? raw
+    : 'Toyhouse | https://toyhou.se\nArtFight | https://artfight.net\nVGen | https://vgen.co';
+  return source
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+    .map((line) => {
+      const idx = line.indexOf('|');
+      if (idx === -1) return { label: line.trim(), url: 'https://' };
+      return { label: line.slice(0, idx).trim(), url: line.slice(idx + 1).trim() };
+    });
+}
+
+function serializePipeLinks(rows: ReadonlyArray<{ label: string; url: string }>): string {
+  return rows.map((r) => `${r.label.replace(/\|/g, '').trim() || 'Link'} | ${r.url.trim() || '#'}`).join('\n');
+}
+
+function resolveEditableInventory(el: DesignElement): InventoryItem[] {
+  if (el.inventoryItems && el.inventoryItems.length > 0) return el.inventoryItems;
+  if (el.subContent && el.subContent.trim()) {
+    return el.subContent
+      .split('\n')
+      .filter(Boolean)
+      .map((line, i) => {
+        const parts = line.split('|').map((s) => s.trim());
+        const parsedCount = parseInt(parts[1] ?? '1', 10);
+        const rarity = parts[2];
+        const validRarity: InventoryItem['rarity'] =
+          rarity === 'rare' || rarity === 'epic' || rarity === 'legendary' ? rarity : 'common';
+        return {
+          id: `inv-${i}`,
+          name: parts[0] || 'Item',
+          count: Number.isNaN(parsedCount) ? 1 : parsedCount,
+          rarity: validRarity,
+          icon: parts[3] || '✦',
+        };
+      });
+  }
+  return DEFAULT_INVENTORY_ITEMS;
+}
+
+function resolveEditableMilestones(el: DesignElement): TimelineMilestone[] {
+  if (el.timelineMilestones && el.timelineMilestones.length > 0) return el.timelineMilestones;
+  if (el.subContent && el.subContent.trim()) {
+    return el.subContent
+      .split('\n\n')
+      .filter(Boolean)
+      .map((block, i) => {
+        const lines = block.split('\n');
+        const [year, title] = (lines[0] || '').split('|').map((s) => s.trim());
+        return {
+          id: `tm-${i}`,
+          year: year || 'ERA',
+          title: title || 'Milestone',
+          description: lines.slice(1).join(' ') || '',
+        };
+      });
+  }
+  return DEFAULT_TIMELINE_MILESTONES;
+}
 
 function getSubContentLabel(type: DesignElement['type']): string {
   switch (type) {
@@ -184,6 +287,504 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
           />
         </label>
       )}
+
+      {/* Visual Progress / Stat Bar Percentage Editor */}
+      {(el.type === 'stat_bar' || el.type === 'pure_progress') && (() => {
+        const defaultPct = el.type === 'pure_progress' ? 65 : 75;
+        const rawParsed = parseInt(el.subContent ?? String(defaultPct), 10);
+        const pct = Math.max(0, Math.min(100, Number.isNaN(rawParsed) ? defaultPct : rawParsed));
+        return (
+          <div
+            style={{ backgroundColor: 'var(--bg-panel-alt)', borderColor: 'var(--border-main)' }}
+            className="p-2.5 rounded-[8px] border space-y-2"
+          >
+            <div className="flex items-center justify-between text-[10.5px]">
+              <span className="font-semibold">Progress Fill</span>
+              <span className="font-mono font-bold" style={{ color: 'var(--accent)' }}>
+                {pct}%
+              </span>
+            </div>
+            <div className="grid grid-cols-[1fr_56px] gap-2 items-center">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={pct}
+                onChange={(e) => updateSelected({ subContent: String(parseInt(e.target.value, 10) || 0) })}
+                className="w-full accent-accent"
+              />
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={pct}
+                onChange={(e) => {
+                  const next = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
+                  updateSelected({ subContent: String(next) });
+                }}
+                style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+                className="border rounded-[5px] px-1.5 py-1 text-[11px] font-mono text-center"
+              />
+            </div>
+            <div className="grid grid-cols-4 gap-1">
+              {[25, 50, 75, 100].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => updateSelected({ subContent: String(preset) })}
+                  style={
+                    pct === preset
+                      ? { backgroundColor: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' }
+                      : { backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }
+                  }
+                  className="border rounded-[4px] py-0.5 text-[10px] font-mono font-semibold"
+                >
+                  {preset}%
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Visual Key/Value Rows Editor (ID Card & Info Table) */}
+      {(el.type === 'kv_table' || el.type === 'id_card') && (() => {
+        const kvRows = parseColonPairs(
+          el.subContent,
+          'Name: Elara Vale\nSpecies: Human\nAge: 21\nPronouns: She/Her'
+        );
+        return (
+          <div
+            style={{ backgroundColor: 'var(--bg-panel-alt)', borderColor: 'var(--border-main)' }}
+            className="p-2.5 rounded-[8px] border space-y-2"
+          >
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-[11px]">Profile Fields ({kvRows.length})</span>
+              <button
+                type="button"
+                onClick={() =>
+                  updateSelected({
+                    subContent: serializeColonPairs([...kvRows, { key: 'Field', value: 'Value' }]),
+                  })
+                }
+                style={{ color: 'var(--accent)' }}
+                className="text-[10px] font-mono font-bold hover:underline flex items-center gap-0.5"
+              >
+                <Plus className="w-3 h-3" /> Add Row
+              </button>
+            </div>
+            <div className="space-y-1.5 max-h-52 overflow-y-auto pr-0.5">
+              {kvRows.map((row, idx) => (
+                <div key={idx} className="grid grid-cols-[1fr_1.3fr_auto] gap-1 items-center">
+                  <input
+                    type="text"
+                    value={row.key}
+                    placeholder="Label"
+                    onChange={(e) => {
+                      const next = [...kvRows];
+                      next[idx] = { ...row, key: e.target.value };
+                      updateSelected({ subContent: serializeColonPairs(next) });
+                    }}
+                    style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+                    className="border rounded-[4px] px-1.5 py-1 text-[10.5px] font-semibold min-w-0"
+                  />
+                  <input
+                    type="text"
+                    value={row.value}
+                    placeholder="Value"
+                    onChange={(e) => {
+                      const next = [...kvRows];
+                      next[idx] = { ...row, value: e.target.value };
+                      updateSelected({ subContent: serializeColonPairs(next) });
+                    }}
+                    style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+                    className="border rounded-[4px] px-1.5 py-1 text-[10.5px] min-w-0"
+                  />
+                  <button
+                    type="button"
+                    disabled={kvRows.length <= 1}
+                    onClick={() =>
+                      updateSelected({
+                        subContent: serializeColonPairs(kvRows.filter((_, i) => i !== idx)),
+                      })
+                    }
+                    className="p-1 text-stone-400 hover:text-red-500 disabled:opacity-30"
+                    title="Delete row"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Visual RPG Stats Editor */}
+      {el.type === 'rpg_stats' && (() => {
+        const stats = parseColonPairs(
+          el.subContent,
+          'STR: 12\nDEX: 18\nCON: 14\nINT: 16\nWIS: 15\nCHA: 13'
+        );
+        return (
+          <div
+            style={{ backgroundColor: 'var(--bg-panel-alt)', borderColor: 'var(--border-main)' }}
+            className="p-2.5 rounded-[8px] border space-y-2"
+          >
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-[11px]">RPG Stat Attributes ({stats.length})</span>
+              <button
+                type="button"
+                onClick={() =>
+                  updateSelected({
+                    subContent: serializeColonPairs([...stats, { key: 'LUK', value: '10' }]),
+                  })
+                }
+                style={{ color: 'var(--accent)' }}
+                className="text-[10px] font-mono font-bold hover:underline flex items-center gap-0.5"
+              >
+                <Plus className="w-3 h-3" /> Add Stat
+              </button>
+            </div>
+            <div className="space-y-1.5 max-h-52 overflow-y-auto pr-0.5">
+              {stats.map((stat, idx) => (
+                <div key={idx} className="grid grid-cols-[1fr_72px_auto] gap-1 items-center">
+                  <input
+                    type="text"
+                    value={stat.key}
+                    placeholder="STR"
+                    onChange={(e) => {
+                      const next = [...stats];
+                      next[idx] = { ...stat, key: e.target.value };
+                      updateSelected({ subContent: serializeColonPairs(next) });
+                    }}
+                    style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+                    className="border rounded-[4px] px-1.5 py-1 text-[10.5px] font-mono font-bold uppercase min-w-0"
+                  />
+                  <input
+                    type="text"
+                    value={stat.value}
+                    placeholder="10"
+                    onChange={(e) => {
+                      const next = [...stats];
+                      next[idx] = { ...stat, value: e.target.value };
+                      updateSelected({ subContent: serializeColonPairs(next) });
+                    }}
+                    style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-strong)' }}
+                    className="border rounded-[4px] px-1.5 py-1 text-[10.5px] font-mono text-center min-w-0"
+                  />
+                  <button
+                    type="button"
+                    disabled={stats.length <= 1}
+                    onClick={() =>
+                      updateSelected({
+                        subContent: serializeColonPairs(stats.filter((_, i) => i !== idx)),
+                      })
+                    }
+                    className="p-1 text-stone-400 hover:text-red-500 disabled:opacity-30"
+                    title="Delete stat"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Visual Social Link Bar Editor */}
+      {el.type === 'social_links' && (() => {
+        const links = parsePipeLinks(el.subContent);
+        return (
+          <div
+            style={{ backgroundColor: 'var(--bg-panel-alt)', borderColor: 'var(--border-main)' }}
+            className="p-2.5 rounded-[8px] border space-y-2"
+          >
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-[11px]">Social Link Pills ({links.length})</span>
+              <button
+                type="button"
+                onClick={() =>
+                  updateSelected({
+                    subContent: serializePipeLinks([...links, { label: 'Website', url: 'https://toyhou.se' }]),
+                  })
+                }
+                style={{ color: 'var(--accent)' }}
+                className="text-[10px] font-mono font-bold hover:underline flex items-center gap-0.5"
+              >
+                <Plus className="w-3 h-3" /> Add Link
+              </button>
+            </div>
+            <div className="space-y-1.5 max-h-52 overflow-y-auto pr-0.5">
+              {links.map((item, idx) => (
+                <div
+                  key={idx}
+                  style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}
+                  className="p-1.5 rounded-[6px] border space-y-1"
+                >
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={item.label}
+                      placeholder="Label"
+                      onChange={(e) => {
+                        const next = [...links];
+                        next[idx] = { ...item, label: e.target.value };
+                        updateSelected({ subContent: serializePipeLinks(next) });
+                      }}
+                      style={{ borderColor: 'var(--border-strong)' }}
+                      className="flex-1 bg-transparent border-b px-1 py-0.5 text-[10.5px] font-semibold min-w-0"
+                    />
+                    <button
+                      type="button"
+                      disabled={links.length <= 1}
+                      onClick={() =>
+                        updateSelected({
+                          subContent: serializePipeLinks(links.filter((_, i) => i !== idx)),
+                        })
+                      }
+                      className="p-1 text-stone-400 hover:text-red-500 disabled:opacity-30"
+                      title="Delete link"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={item.url}
+                    placeholder="https://..."
+                    onChange={(e) => {
+                      const next = [...links];
+                      next[idx] = { ...item, url: e.target.value };
+                      updateSelected({ subContent: serializePipeLinks(next) });
+                    }}
+                    style={{ borderColor: 'var(--border-main)' }}
+                    className="w-full bg-transparent border rounded px-1.5 py-0.5 text-[10px] font-mono"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Visual RPG Inventory Slot Editor */}
+      {el.type === 'inventory' && (() => {
+        const items = resolveEditableInventory(el);
+        return (
+          <div
+            style={{ backgroundColor: 'var(--bg-panel-alt)', borderColor: 'var(--border-main)' }}
+            className="p-2.5 rounded-[8px] border space-y-2"
+          >
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-[11px]">Equipment Slots ({items.length})</span>
+              <button
+                type="button"
+                onClick={() =>
+                  updateSelected({
+                    inventoryItems: [
+                      ...items,
+                      {
+                        id: `inv-${Date.now().toString().slice(-4)}`,
+                        name: 'New Item',
+                        count: 1,
+                        rarity: 'common',
+                        icon: '✦',
+                      },
+                    ],
+                  })
+                }
+                style={{ color: 'var(--accent)' }}
+                className="text-[10px] font-mono font-bold hover:underline flex items-center gap-0.5"
+              >
+                <Plus className="w-3 h-3" /> Add Slot
+              </button>
+            </div>
+            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
+              {items.map((item, idx) => (
+                <div
+                  key={item.id}
+                  style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}
+                  className="p-1.5 rounded-[6px] border space-y-1"
+                >
+                  <div className="grid grid-cols-[36px_1fr_auto] gap-1 items-center">
+                    <input
+                      type="text"
+                      value={item.icon}
+                      onChange={(e) => {
+                        const next = [...items];
+                        next[idx] = { ...item, icon: e.target.value };
+                        updateSelected({ inventoryItems: next });
+                      }}
+                      style={{ borderColor: 'var(--border-strong)' }}
+                      className="bg-transparent border rounded px-1 py-0.5 text-center text-xs"
+                      title="Slot icon / emoji"
+                    />
+                    <input
+                      type="text"
+                      value={item.name}
+                      placeholder="Item Name"
+                      onChange={(e) => {
+                        const next = [...items];
+                        next[idx] = { ...item, name: e.target.value };
+                        updateSelected({ inventoryItems: next });
+                      }}
+                      style={{ borderColor: 'var(--border-strong)' }}
+                      className="bg-transparent border-b px-1 py-0.5 text-[10.5px] font-semibold min-w-0"
+                    />
+                    <button
+                      type="button"
+                      disabled={items.length <= 1}
+                      onClick={() =>
+                        updateSelected({
+                          inventoryItems: items.filter((_, i) => i !== idx),
+                        })
+                      }
+                      className="p-1 text-stone-400 hover:text-red-500 disabled:opacity-30"
+                      title="Delete slot"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                    <label className="flex items-center gap-1">
+                      <span style={{ color: 'var(--text-muted)' }}>Qty:</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={999}
+                        value={item.count}
+                        onChange={(e) => {
+                          const next = [...items];
+                          next[idx] = { ...item, count: Math.max(0, parseInt(e.target.value, 10) || 0) };
+                          updateSelected({ inventoryItems: next });
+                        }}
+                        style={{ borderColor: 'var(--border-strong)' }}
+                        className="w-full bg-transparent border rounded px-1 py-0.5 font-mono text-center"
+                      />
+                    </label>
+                    <select
+                      value={item.rarity}
+                      onChange={(e) => {
+                        const next = [...items];
+                        next[idx] = {
+                          ...item,
+                          rarity: e.target.value as InventoryItem['rarity'],
+                        };
+                        updateSelected({ inventoryItems: next });
+                      }}
+                      style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-strong)' }}
+                      className="border rounded px-1 py-0.5 text-[10px]"
+                    >
+                      <option value="common">Common</option>
+                      <option value="rare">Rare</option>
+                      <option value="epic">Epic</option>
+                      <option value="legendary">Legendary</option>
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Visual Timeline Milestone Editor */}
+      {el.type === 'timeline' && (() => {
+        const milestones = resolveEditableMilestones(el);
+        return (
+          <div
+            style={{ backgroundColor: 'var(--bg-panel-alt)', borderColor: 'var(--border-main)' }}
+            className="p-2.5 rounded-[8px] border space-y-2"
+          >
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-[11px]">Timeline Milestones ({milestones.length})</span>
+              <button
+                type="button"
+                onClick={() =>
+                  updateSelected({
+                    timelineMilestones: [
+                      ...milestones,
+                      {
+                        id: `tm-${Date.now().toString().slice(-4)}`,
+                        year: 'NEW ERA',
+                        title: 'Key Event',
+                        description: 'Describe what changed...',
+                      },
+                    ],
+                  })
+                }
+                style={{ color: 'var(--accent)' }}
+                className="text-[10px] font-mono font-bold hover:underline flex items-center gap-0.5"
+              >
+                <Plus className="w-3 h-3" /> Add Milestone
+              </button>
+            </div>
+            <div className="space-y-1.5 max-h-60 overflow-y-auto pr-0.5">
+              {milestones.map((ms, idx) => (
+                <div
+                  key={ms.id}
+                  style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-main)' }}
+                  className="p-2 rounded-[6px] border space-y-1"
+                >
+                  <div className="grid grid-cols-[78px_1fr_auto] gap-1 items-center">
+                    <input
+                      type="text"
+                      value={ms.year}
+                      placeholder="AGE 07"
+                      onChange={(e) => {
+                        const next = [...milestones];
+                        next[idx] = { ...ms, year: e.target.value };
+                        updateSelected({ timelineMilestones: next });
+                      }}
+                      style={{ borderColor: 'var(--border-strong)', color: 'var(--accent)' }}
+                      className="bg-transparent border rounded px-1 py-0.5 text-[10px] font-mono font-bold"
+                    />
+                    <input
+                      type="text"
+                      value={ms.title}
+                      placeholder="Milestone Title"
+                      onChange={(e) => {
+                        const next = [...milestones];
+                        next[idx] = { ...ms, title: e.target.value };
+                        updateSelected({ timelineMilestones: next });
+                      }}
+                      style={{ borderColor: 'var(--border-strong)' }}
+                      className="bg-transparent border-b px-1 py-0.5 text-[10.5px] font-bold min-w-0"
+                    />
+                    <button
+                      type="button"
+                      disabled={milestones.length <= 1}
+                      onClick={() =>
+                        updateSelected({
+                          timelineMilestones: milestones.filter((_, i) => i !== idx),
+                        })
+                      }
+                      className="p-1 text-stone-400 hover:text-red-500 disabled:opacity-30"
+                      title="Delete milestone"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <textarea
+                    rows={2}
+                    value={ms.description}
+                    placeholder="Event description..."
+                    onChange={(e) => {
+                      const next = [...milestones];
+                      next[idx] = { ...ms, description: e.target.value };
+                      updateSelected({ timelineMilestones: next });
+                    }}
+                    style={{ borderColor: 'var(--border-main)' }}
+                    className="w-full bg-transparent border rounded px-1.5 py-1 text-[10px]"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Interactive Tabs Editor */}
       {(el.type === 'tabs' || el.type === 'pure_f2u_tabs') && (
@@ -562,7 +1163,7 @@ export const ContentAndWidgetsSection: React.FC<ContentAndWidgetsSectionProps> =
           </div>
           {isToyhouseFree && el.imageHoverEffect && el.imageHoverEffect !== 'none' && (
             <div className="text-[9px] text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded px-2 py-1">
-              Moodboard CSS :hover effects require Toyhouse Premium or Carrd Pro (stripped on Toyhouse Free).
+              Moodboard CSS :hover effects require Toyhouse Premium (stripped on Toyhouse Free).
             </div>
           )}
 

@@ -14,6 +14,7 @@ import { isPureContainerType, PURE_PRIMITIVE_DEFAULTS } from './data/purePrimiti
 import { SearchableCatalogItem } from './data/searchCatalog';
 import { DEFAULT_CUSTOM_BLUEPRINTS, TemplatePreset } from './data/templates';
 import { getElementF2UShieldReport, isToyhouseFreePlatform } from './engine/f2uShield';
+import { parseToyhouseHtmlToDesign } from './engine/htmlImporter';
 import {
   generatePlatformExport,
   renderInnerElementHTML,
@@ -42,7 +43,11 @@ import {
   TargetPlatform,
   UiTheme,
 } from './types/schema';
-import { getInnerBoxGeometry } from './utils/canvasGeometry';
+import {
+  getElementCanvasOrigin,
+  getSplitPaneGeometry,
+  resolvePointInContainer,
+} from './utils/canvasGeometry';
 import { buildUniformBorderPatch, getDisplayBorderColor } from './utils/borderHelpers';
 import {
   buildBlueprintInstanceElement,
@@ -55,9 +60,10 @@ import {
   groupSelectedElementsIntoContainer,
 } from './utils/elementHierarchy';
 import { processLocalImageFile } from './utils/imageUpload';
+import { buildPreviewSrcDoc } from './utils/previewDocument';
+import { classifyPastedPayload, INTERNAL_CLIPBOARD_PREFIX } from './utils/smartPaste';
 import {
   applyStudioThemeToDocument,
-  extractDesignImageUrls,
   KeybindingMap,
   loadKeybindings,
   loadStudioPreferences,
@@ -186,7 +192,7 @@ export default function App() {
     return initialBootstrap.guides || [];
   });
 
-  const [leftSidebarTab, setLeftSidebarTab] = useState<LeftSidebarTab>('pure');
+  const [leftSidebarTab, setLeftSidebarTab] = useState<LeftSidebarTab>('elements');
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('style');
   const [canvasTool, setCanvasTool] = useState<CanvasDrawTool>('select');
   const [magneticSnap, setMagneticSnap] = useState<boolean>(true);
@@ -356,11 +362,15 @@ export default function App() {
     canRedo,
     commitElements,
     commitWithUpdater,
+    commitCoalesced,
     replaceElementsTransient,
     commitLatestElements,
     undo,
     redo,
+    setAutosaveSuspended,
+    confirmDiscardIfDirty,
     saveNotice,
+    flashSaveNotice,
     currentFilePath,
     projectName,
     isDirty,
@@ -500,10 +510,7 @@ export default function App() {
     effectiveCanvasHeight,
     canvasScreenLeft,
     canvasScreenTop,
-    cursorCoords,
-    setCursorCoords,
-    cursorInViewport,
-    setCursorInViewport,
+    cursorTracker,
     isSpacePressed,
     setIsSpacePressed,
     panDrag,
@@ -513,6 +520,7 @@ export default function App() {
     fitCanvasToView,
     centerCanvasView,
     clientToCanvas,
+    clientToCanvasWithInside,
   } = useViewportNavigation({
     canvasWidth,
     canvasHeight,
@@ -542,6 +550,7 @@ export default function App() {
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,
+    cancelActiveGesture,
   } = useCanvasPointer({
     elements,
     elementsRef,
@@ -564,10 +573,9 @@ export default function App() {
     setPanDrag,
     setPanOffset,
     clampPan,
-    setCursorCoords,
-    setCursorInViewport,
+    cursorTracker,
     clientToCanvas,
-    canvasViewportRef,
+    clientToCanvasWithInside,
     leftSplitContainerRef,
     replaceElementsTransient,
     commitElements,
@@ -583,6 +591,9 @@ export default function App() {
   const isCanvasDragging = Boolean(
     dragState || splitDragState || guideDragState || panelResizeDrag || drawMarquee
   );
+  useEffect(() => {
+    setAutosaveSuspended(isCanvasDragging);
+  }, [isCanvasDragging, setAutosaveSuspended]);
   const deferredElements = useDeferredValue(elements);
   const exportSourceElements = isCanvasDragging ? deferredElements : elements;
   const lastExportRef = useRef<ReturnType<typeof generatePlatformExport> | null>(null);
@@ -618,652 +629,69 @@ export default function App() {
 
   const previewSrcDoc = useMemo(() => {
     if (!isPreviewVisible) return '';
-    const cute = studioPrefs.cuteThemeColors;
-    const themeMap: Record<
-      PreviewSurface,
-      {
-        bg: string;
-        text: string;
-        navBg: string;
-        navText: string;
-        sideBg: string;
-        sideBorder: string;
-        cardBg: string;
-        muted: string;
-        link: string;
-        bannerBg: string;
-        bannerText: string;
-      }
-    > = {
-      th_dark: {
-        bg: '#16141C',
-        text: '#DCD9E6',
-        navBg: '#23202D',
-        navText: '#EDEAF5',
-        sideBg: '#272333',
-        sideBorder: '#363147',
-        cardBg: '#2B2537',
-        muted: '#9D97B0',
-        link: '#6CB8C0',
-        bannerBg: '#4E8C93',
-        bannerText: '#FFFFFF',
-      },
-      th_light: {
-        bg: '#F4F5F7',
-        text: '#212529',
-        navBg: '#FFFFFF',
-        navText: '#212529',
-        sideBg: '#F8F9FA',
-        sideBorder: '#DEE2E6',
-        cardBg: '#FFFFFF',
-        muted: '#6C757D',
-        link: '#007BFF',
-        bannerBg: '#007BFF',
-        bannerText: '#FFFFFF',
-      },
-      th_pink: {
-        bg: '#FDF3F7',
-        text: '#472D38',
-        navBg: '#D87A9D',
-        navText: '#FFFFFF',
-        sideBg: '#FFF9FB',
-        sideBorder: '#F2D2DF',
-        cardBg: '#FFF5F9',
-        muted: '#946B7D',
-        link: '#C94D7C',
-        bannerBg: '#D87A9D',
-        bannerText: '#FFFFFF',
-      },
-      th_teal: {
-        bg: '#EDF6F7',
-        text: '#1D373B',
-        navBg: '#265C63',
-        navText: '#FFFFFF',
-        sideBg: '#F7FBFB',
-        sideBorder: '#C7E0E3',
-        cardBg: '#F1F9FA',
-        muted: '#5D8085',
-        link: '#247E88',
-        bannerBg: '#3D8891',
-        bannerText: '#FFFFFF',
-      },
-      th_cute: {
-        bg: cute.bgApp,
-        text: cute.textMain,
-        navBg: cute.accentSecondary,
-        navText: '#FFFFFF',
-        sideBg: cute.bgPanel,
-        sideBorder: cute.borderMain,
-        cardBg: cute.bgPanelAlt,
-        muted: cute.textMuted,
-        link: cute.accentPrimary,
-        bannerBg: cute.accentPrimary,
-        bannerText: '#FFFFFF',
-      },
-      paper: {
-        bg: '#E5E0D5',
-        text: '#2C2A28',
-        navBg: '#2C2A28',
-        navText: '#F7F5F0',
-        sideBg: '#F0ECE3',
-        sideBorder: '#DCD6C8',
-        cardBg: '#F7F5F0',
-        muted: '#78736A',
-        link: '#C86D51',
-        bannerBg: '#C86D51',
-        bannerText: '#FFFFFF',
-      },
-    };
-    const palette = themeMap[previewSurface] || themeMap.th_dark;
-    const isTh = platform.startsWith('toyhouse');
-    const useShell = isTh && previewToyhouseShell;
-    const escapeHtmlText = (v: string) =>
-      v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const escapeHtmlAttr = (v: string) =>
-      escapeHtmlText(v).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    const safeTitle = escapeHtmlText(projectName || 'Character Profile');
-    const designImages = extractDesignImageUrls(elements);
-    const firstDesignImage = designImages[0];
-    const createdDateStr = new Date().toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
+    return buildPreviewSrcDoc({
+      elements,
+      exportHtml: exportResult.html,
+      platform,
+      canvasWidth,
+      previewSurface,
+      previewToyhouseShell,
+      projectName,
+      cuteThemeColors: studioPrefs.cuteThemeColors,
     });
-
-    const dbxIconBadge = (sizePx: number, fontSizePx: number, radiusPx = 4) => `
-      <span class="th-dbx-avatar" style="width:${sizePx}px;height:${sizePx}px;border-radius:${radiusPx}px;font-size:${fontSizePx}px;">DBX</span>
-    `;
-
-    const primaryCharAvatarHtml = firstDesignImage
-      ? `<img src="${escapeHtmlAttr(firstDesignImage)}" alt="${safeTitle}" class="th-char-avatar-img" />`
-      : dbxIconBadge(64, 15, 6);
-
-    const sidebarCharThumbHtml = firstDesignImage
-      ? `<img src="${escapeHtmlAttr(firstDesignImage)}" alt="${safeTitle}" class="th-side-mini-img" />`
-      : dbxIconBadge(26, 8, 4);
-
-    const recentImagesHtml =
-      designImages.length > 0
-        ? designImages
-            .slice(0, 6)
-            .map(
-              (imgUrl, idx) => `
-          <div class="th-recent-thumb">
-            <img src="${escapeHtmlAttr(imgUrl)}" alt="Design Image ${idx + 1}" />
-            <span class="th-thumb-edit"><i class="fa-solid fa-pencil"></i></span>
-          </div>`
-            )
-            .join('')
-        : Array.from({ length: 4 }, (_, idx) => `
-          <div class="th-recent-thumb placeholder">
-            <div class="th-thumb-placeholder-inner">
-              <i class="fa-regular fa-image"></i>
-              <span>Image ${idx + 1}</span>
-            </div>
-            <span class="th-thumb-edit"><i class="fa-solid fa-pencil"></i></span>
-          </div>`).join('');
-
-    const bsFallbackCss = isTh
-      ? `
-      .collapse:not(.show) { display: none; }
-      .container { width: 100%; padding-right: 15px; padding-left: 15px; margin-right: auto; margin-left: auto; }
-      .row { display: flex; flex-wrap: wrap; margin-right: -15px; margin-left: -15px; }
-      .no-gutters { margin-right: 0; margin-left: 0; }
-      .no-gutters > .col, .no-gutters > [class*="col-"] { padding-right: 0; padding-left: 0; }
-      .mx-auto { margin-left: auto !important; margin-right: auto !important; }
-      .w-100 { width: 100% !important; }
-      .p-0 { padding: 0 !important; }
-      .p-1 { padding: 0.25rem !important; }
-      .p-3 { padding: 1rem !important; }
-      .col-12 { position: relative; width: 100%; flex: 0 0 100%; max-width: 100%; }
-      @media (min-width: 576px) {
-        .col-sm-6 { position: relative; width: 100%; flex: 0 0 50%; max-width: 50%; }
-      }
-      @media (min-width: 768px) {
-        ${Array.from({ length: 12 }, (_, i) => `.col-md-${i + 1} { flex: 0 0 ${(((i + 1) / 12) * 100).toFixed(4)}%; max-width: ${(((i + 1) / 12) * 100).toFixed(4)}%; }`).join('\n        ')}
-      }
-      @media (min-width: 992px) {
-        ${Array.from({ length: 12 }, (_, i) => `.col-lg-${i + 1} { flex: 0 0 ${(((i + 1) / 12) * 100).toFixed(4)}%; max-width: ${(((i + 1) / 12) * 100).toFixed(4)}%; }`).join('\n        ')}
-      }
-      .card { background-color: ${palette.cardBg}; border: 1px solid ${palette.sideBorder}; border-radius: 0.25rem; }
-      .card-header { border-bottom: 1px solid ${palette.sideBorder}; }
-      .bg-faded { background-color: ${palette.sideBg}; }
-      .text-muted { color: ${palette.muted} !important; }
-      .btn { display: inline-block; font-weight: 400; text-align: center; vertical-align: middle; user-select: none; border: 1px solid transparent; padding: 0.375rem 0.75rem; font-size: 1rem; line-height: 1.5; border-radius: 0.25rem; }
-      .btn-block { display: block; width: 100%; }
-      .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.875rem; line-height: 1.5; border-radius: 0.2rem; }
-      `
-      : '';
-
-    const shellStyles = useShell
-      ? `
-      .th-dbx-avatar {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        background: linear-gradient(135deg, ${palette.bannerBg}, ${palette.link});
-        color: #fff;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-weight: 800;
-        letter-spacing: 0.04em;
-        flex-shrink: 0;
-        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.22);
-      }
-      .th-sim-nav {
-        height: 42px;
-        background-color: ${palette.navBg};
-        color: ${palette.navText};
-        padding: 0 16px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        font-size: 12.5px;
-        border-bottom: 1px solid ${palette.sideBorder};
-      }
-      .th-nav-left, .th-nav-right {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-      }
-      .th-nav-brand {
-        font-weight: 700;
-        font-size: 14px;
-        letter-spacing: 0.04em;
-      }
-      .th-nav-link {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        opacity: 0.84;
-        font-size: 12px;
-      }
-      .th-nav-user {
-        display: inline-flex;
-        align-items: center;
-        gap: 7px;
-        font-weight: 600;
-        font-size: 12px;
-      }
-      .th-sim-layout {
-        display: flex;
-        align-items: stretch;
-        min-height: calc(100vh - 42px);
-      }
-      .th-sim-sidebar {
-        width: 215px;
-        flex-shrink: 0;
-        background-color: ${palette.sideBg};
-        border-right: 1px solid ${palette.sideBorder};
-        font-size: 12px;
-      }
-      .th-side-banner {
-        background-color: ${palette.bannerBg};
-        color: ${palette.bannerText};
-        padding: 7px 12px;
-        font-weight: 600;
-        font-size: 12.5px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .th-side-owner-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 12px;
-        color: ${palette.link};
-        font-weight: 600;
-      }
-      .th-side-char-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 12px;
-        background-color: rgba(255,255,255,0.04);
-        border-left: 3px solid ${palette.bannerBg};
-        color: ${palette.text};
-        font-weight: 600;
-      }
-      .th-side-mini-img {
-        width: 26px;
-        height: 26px;
-        border-radius: 4px;
-        object-fit: cover;
-        flex-shrink: 0;
-        border: 1px solid ${palette.sideBorder};
-      }
-      .th-side-group {
-        border-top: 1px solid ${palette.sideBorder};
-        padding: 5px 0;
-      }
-      .th-side-link {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 5px 12px;
-        color: ${palette.link};
-        font-size: 12px;
-      }
-      .th-side-link-left {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .th-side-link-left i {
-        width: 14px;
-        text-align: center;
-        opacity: 0.85;
-      }
-      .th-side-count {
-        background-color: ${palette.cardBg};
-        color: ${palette.muted};
-        border: 1px solid ${palette.sideBorder};
-        border-radius: 4px;
-        padding: 0 5px;
-        font-size: 10.5px;
-        font-weight: 600;
-      }
-      .th-side-control-item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 6px 12px;
-        color: ${palette.link};
-        font-size: 11.5px;
-        border-bottom: 1px solid ${palette.sideBorder};
-      }
-      .th-sim-main {
-        flex: 1;
-        min-width: 0;
-        padding: 14px 22px 24px;
-      }
-      .th-char-header {
-        background-color: ${palette.cardBg};
-        border: 1px solid ${palette.sideBorder};
-        border-radius: 4px;
-        padding: 12px 16px;
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        justify-content: space-between;
-        gap: 14px;
-        margin-bottom: 18px;
-      }
-      .th-char-identity {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-        min-width: 0;
-      }
-      .th-char-avatar-img {
-        width: 64px;
-        height: 64px;
-        border-radius: 5px;
-        object-fit: cover;
-        border: 1px solid ${palette.sideBorder};
-        flex-shrink: 0;
-      }
-      .th-char-title {
-        font-size: 21px;
-        font-weight: 500;
-        margin: 0 0 2px;
-        color: ${palette.text};
-        line-height: 1.2;
-      }
-      .th-char-user {
-        font-size: 12px;
-        color: ${palette.link};
-        display: flex;
-        align-items: center;
-        gap: 5px;
-      }
-      .th-char-meta {
-        display: grid;
-        grid-template-columns: 78px auto;
-        gap: 4px 20px;
-        font-size: 11.5px;
-        padding-left: 16px;
-        border-left: 1px solid ${palette.sideBorder};
-      }
-      .th-meta-label {
-        color: ${palette.muted};
-        font-weight: 600;
-      }
-      .th-meta-value {
-        color: ${palette.text};
-      }
-      .th-meta-link {
-        color: ${palette.link};
-      }
-      .th-section-heading {
-        font-size: 17px;
-        font-weight: 400;
-        color: ${palette.text};
-        border-bottom: 1px solid ${palette.sideBorder};
-        padding-bottom: 6px;
-        margin: 0 0 14px;
-      }
-      .th-recent-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        border-bottom: 1px solid ${palette.sideBorder};
-        padding-bottom: 6px;
-        margin: 26px 0 12px;
-      }
-      .th-recent-header h2 {
-        font-size: 17px;
-        font-weight: 400;
-        margin: 0;
-        color: ${palette.text};
-      }
-      .th-view-more {
-        background-color: ${palette.cardBg};
-        border: 1px solid ${palette.sideBorder};
-        color: ${palette.text};
-        font-size: 11px;
-        padding: 4px 10px;
-        border-radius: 4px;
-      }
-      .th-recent-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
-        gap: 10px;
-      }
-      .th-recent-thumb {
-        position: relative;
-        aspect-ratio: 1 / 1;
-        background-color: ${palette.cardBg};
-        border: 1px solid ${palette.sideBorder};
-        border-radius: 3px;
-        padding: 5px;
-        overflow: hidden;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .th-recent-thumb img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        border-radius: 2px;
-        display: block;
-      }
-      .th-recent-thumb.placeholder {
-        border-style: dashed;
-      }
-      .th-thumb-placeholder-inner {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 6px;
-        color: ${palette.muted};
-        font-size: 11px;
-        opacity: 0.7;
-      }
-      .th-thumb-placeholder-inner i {
-        font-size: 20px;
-      }
-      .th-thumb-edit {
-        position: absolute;
-        right: 6px;
-        bottom: 6px;
-        width: 22px;
-        height: 22px;
-        border-radius: 3px;
-        background-color: ${palette.sideBg};
-        border: 1px solid ${palette.sideBorder};
-        color: ${palette.muted};
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 10px;
-      }
-      @media (max-width: 767px) {
-        .th-sim-sidebar { display: none; }
-        .th-sim-main { padding: 10px; }
-        .th-char-meta { border-left: none; padding-left: 0; }
-      }
-      `
-      : '';
-
-    const bodyContent = useShell
-      ? `
-    <header class="th-sim-nav">
-      <div class="th-nav-left">
-        <span class="th-nav-brand">TOYHOU.SE</span>
-        <span class="th-nav-link"><i class="fa-solid fa-home"></i><span>Profile</span></span>
-        <span class="th-nav-link"><i class="fa-solid fa-comments"></i><span>Forums</span></span>
-        <span class="th-nav-link"><i class="fa-solid fa-search"></i><span>Browse</span><i class="fa-solid fa-caret-down" style="font-size:9px;"></i></span>
-        <span class="th-nav-link"><i class="fa-solid fa-plus"></i><span>Submit</span><i class="fa-solid fa-caret-down" style="font-size:9px;"></i></span>
-      </div>
-      <div class="th-nav-right">
-        <span class="th-nav-link" style="opacity:0.7;"><i class="fa-solid fa-envelope"></i></span>
-        <span class="th-nav-user">
-          ${dbxIconBadge(22, 8, 4)}
-          <span>user</span>
-          <i class="fa-solid fa-caret-down" style="font-size:9px;opacity:0.7;"></i>
-        </span>
-      </div>
-    </header>
-    <div class="th-sim-layout">
-      <aside class="th-sim-sidebar">
-        <div class="th-side-banner">
-          <i class="fa-solid fa-heart"></i>
-          <span>Character</span>
-        </div>
-        <div class="th-side-owner-row">
-          ${dbxIconBadge(26, 8, 4)}
-          <span class="text-truncate">user</span>
-        </div>
-        <div class="th-side-banner">
-          <i class="fa-solid fa-folder"></i>
-          <span>Character</span>
-        </div>
-        <div class="th-side-char-row">
-          ${sidebarCharThumbHtml}
-          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${safeTitle}</span>
-        </div>
-        <div class="th-side-group">
-          <div class="th-side-link">
-            <span class="th-side-link-left"><i class="fa-regular fa-images"></i><span>Gallery</span></span>
-            <span class="th-side-count">${designImages.length}</span>
-          </div>
-          <div class="th-side-link"><span class="th-side-link-left"><i class="fa-solid fa-book"></i><span>Library</span></span></div>
-          <div class="th-side-link"><span class="th-side-link-left"><i class="fa-solid fa-globe"></i><span>Worlds</span></span></div>
-          <div class="th-side-link"><span class="th-side-link-left"><i class="fa-solid fa-link"></i><span>Links</span></span></div>
-        </div>
-        <div class="th-side-group">
-          <div class="th-side-link"><span class="th-side-link-left"><i class="fa-regular fa-comments"></i><span>Comments</span></span></div>
-          <div class="th-side-link">
-            <span class="th-side-link-left"><i class="fa-regular fa-star"></i><span>Favorite</span></span>
-            <span class="th-side-count">1</span>
-          </div>
-          <div class="th-side-link"><span class="th-side-link-left"><i class="fa-solid fa-certificate"></i><span>Ownership</span></span></div>
-        </div>
-        <div class="th-side-group">
-          <div class="th-side-link"><span class="th-side-link-left"><i class="fa-solid fa-triangle-exclamation"></i><span>Report</span></span></div>
-          <div class="th-side-link"><span class="th-side-link-left"><i class="fa-solid fa-ban"></i><span>Block</span></span></div>
-        </div>
-        <div class="th-side-banner" style="margin-top:4px;">
-          <i class="fa-solid fa-wrench"></i>
-          <span>Control Panel</span>
-        </div>
-        <div class="th-side-control-item"><span>Manage Character</span><i class="fa-solid fa-caret-right"></i></div>
-        <div class="th-side-control-item"><span>Manage Images</span><i class="fa-solid fa-caret-right"></i></div>
-        <div class="th-side-control-item"><span>Manage Literatures</span><i class="fa-solid fa-caret-right"></i></div>
-      </aside>
-      <main class="th-sim-main">
-        <div class="th-char-header">
-          <div class="th-char-identity">
-            ${primaryCharAvatarHtml}
-            <div style="min-width:0;">
-              <h1 class="th-char-title">${safeTitle}</h1>
-              <div class="th-char-user"><i class="fa-solid fa-user"></i><span>user</span></div>
-            </div>
-          </div>
-          <div class="th-char-meta">
-            <span class="th-meta-label">Created</span>
-            <span class="th-meta-value">${createdDateStr}</span>
-            <span class="th-meta-label">Creator</span>
-            <span class="th-meta-link"><i class="fa-solid fa-user" style="margin-right:4px;"></i>user</span>
-            <span class="th-meta-label">Favorites</span>
-            <span class="th-meta-link">1</span>
-          </div>
-        </div>
-
-        <h2 class="th-section-heading">Profile</h2>
-        <div class="user-content mx-auto" style="max-width: ${Math.max(canvasWidth + 32, 920)}px;">
-          ${exportResult.html}
-        </div>
-
-        <div class="th-recent-header">
-          <h2>Recent Images</h2>
-          <span class="th-view-more">View More</span>
-        </div>
-        <div class="th-recent-grid">
-          ${recentImagesHtml}
-        </div>
-      </main>
-    </div>`
-      : `<div style="padding: 16px;">${exportResult.html}</div>`;
-
-    return `<!doctype html>
-<html>
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400..700&family=Cinzel:wght@400..900&family=Cormorant+Garamond:ital,wght@0,300..700;1,300..700&family=Inter:wght@300..800&family=Montserrat:ital,wght@0,300..800;1,300..800&family=Orbitron:wght@400..900&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Press+Start+2P&family=Space+Grotesk:wght@300..700&family=Syne:wght@400..800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
-    ${isTh ? '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css" crossorigin="anonymous" />' : ''}
-    <style>
-      *, *::before, *::after { box-sizing: border-box; }
-      html, body {
-        margin: 0;
-        padding: 0;
-        min-height: 100%;
-        background-color: ${palette.bg};
-        color: ${palette.text};
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-        font-size: 14px;
-        line-height: 1.5;
-      }
-      a { color: ${palette.link}; }
-      ${bsFallbackCss}
-      ${shellStyles}
-    </style>
-  </head>
-  <body>
-    ${bodyContent}
-    <script>
-      document.addEventListener('click', function (e) {
-        var tabTrigger = e.target.closest('[data-toggle="tab"]');
-        if (tabTrigger) {
-          e.preventDefault();
-          var targetSel = tabTrigger.getAttribute('href') || tabTrigger.getAttribute('data-target');
-          var nav = tabTrigger.closest('.nav');
-          if (nav) {
-            nav.querySelectorAll('.nav-link').forEach(function (l) { l.classList.remove('active'); });
-            tabTrigger.classList.add('active');
-          }
-          if (targetSel) {
-            var pane = document.querySelector(targetSel);
-            if (pane && pane.parentElement) {
-              pane.parentElement.querySelectorAll('.tab-pane').forEach(function (p) {
-                p.classList.remove('active', 'show');
-              });
-              pane.classList.add('active', 'show');
-            }
-          }
-          return;
-        }
-        var colTrigger = e.target.closest('[data-toggle="collapse"]');
-        if (colTrigger) {
-          e.preventDefault();
-          var colSel = colTrigger.getAttribute('href') || colTrigger.getAttribute('data-target');
-          if (colSel) {
-            var colEl = document.querySelector(colSel);
-            if (colEl) colEl.classList.toggle('show');
-          }
-        }
-      });
-      document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') {
-          window.parent.postMessage({ type: 'DBX_ESCAPE_KEY' }, '*');
-        }
-      });
-    </script>
-  </body>
-</html>`;
   }, [
     isPreviewVisible,
-    canvasWidth,
     elements,
     exportResult.html,
     platform,
+    canvasWidth,
     previewSurface,
+    previewToyhouseShell,
+    projectName,
+    studioPrefs.cuteThemeColors,
+  ]);
+
+  const compareNightSrcDoc = useMemo(() => {
+    if (!showLivePreviewModal) return '';
+    return buildPreviewSrcDoc({
+      elements,
+      exportHtml: exportResult.html,
+      platform,
+      canvasWidth,
+      previewSurface: 'th_dark',
+      previewToyhouseShell,
+      projectName,
+      cuteThemeColors: studioPrefs.cuteThemeColors,
+    });
+  }, [
+    showLivePreviewModal,
+    elements,
+    exportResult.html,
+    platform,
+    canvasWidth,
+    previewToyhouseShell,
+    projectName,
+    studioPrefs.cuteThemeColors,
+  ]);
+
+  const compareLightSrcDoc = useMemo(() => {
+    if (!showLivePreviewModal) return '';
+    return buildPreviewSrcDoc({
+      elements,
+      exportHtml: exportResult.html,
+      platform,
+      canvasWidth,
+      previewSurface: 'th_light',
+      previewToyhouseShell,
+      projectName,
+      cuteThemeColors: studioPrefs.cuteThemeColors,
+    });
+  }, [
+    showLivePreviewModal,
+    elements,
+    exportResult.html,
+    platform,
+    canvasWidth,
     previewToyhouseShell,
     projectName,
     studioPrefs.cuteThemeColors,
@@ -1282,6 +710,7 @@ export default function App() {
   };
 
   const handleNewBlankCanvas = () => {
+    if (!confirmDiscardIfDirty('start a blank canvas')) return;
     commitElements([]);
     setSelectedId(null);
     setSelectedIds([]);
@@ -1304,29 +733,69 @@ export default function App() {
     setShowTemplatesModal(false);
   };
 
+  const handleNewBlankWithSize = (width: number, height: number, presetLabel?: string) => {
+    if (!confirmDiscardIfDirty('start a blank canvas')) return;
+    commitElements([]);
+    setSelectedId(null);
+    setSelectedIds([]);
+    setInlineEditId(null);
+    setEditingContainerId(null);
+    setCanvasWidth(width);
+    setCanvasHeight(height);
+    setCanvasPattern('none');
+    markSavedClean(presetLabel || 'Untitled Draft');
+    setShowTemplatesModal(false);
+  };
+
   const handleOpenProject = useCallback(async () => {
     const handledNatively = await handleOpenProjectNative();
     if (!handledNatively) {
+      if (!confirmDiscardIfDirty('open another project')) return;
       fileInputRef.current?.click();
     }
-  }, [handleOpenProjectNative]);
+  }, [confirmDiscardIfDirty, handleOpenProjectNative]);
 
   const updateSelected = useCallback(
-    (patch: Partial<DesignElement>) => {
+    (patch: Partial<DesignElement>, coalesceKey?: string) => {
       const targetIds = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
       if (targetIds.length === 0) return;
-      commitWithUpdater((prev) =>
-        prev.map((el) => (targetIds.includes(el.id) ? { ...el, ...patch } : el))
+      const effectiveKey =
+        coalesceKey || `edit:${targetIds.join(',')}:${Object.keys(patch).sort().join(',')}`;
+      commitCoalesced(
+        (prev) => {
+          let changed = false;
+          const next = prev.map((el) => {
+            if (!targetIds.includes(el.id) || el.locked) return el;
+            changed = true;
+            return { ...el, ...patch };
+          });
+          return changed ? next : prev;
+        },
+        effectiveKey,
+        450
       );
     },
-    [commitWithUpdater, selectedId, selectedIds]
+    [commitCoalesced, selectedId, selectedIds]
   );
 
   const updateElementById = useCallback(
     (id: string, patch: Partial<DesignElement>) => {
-      commitWithUpdater((prev) => prev.map((el) => (el.id === id ? { ...el, ...patch } : el)));
+      const key = `edit:${id}:${Object.keys(patch).sort().join(',')}`;
+      commitCoalesced(
+        (prev) => {
+          let changed = false;
+          const next = prev.map((el) => {
+            if (el.id !== id || el.locked) return el;
+            changed = true;
+            return { ...el, ...patch };
+          });
+          return changed ? next : prev;
+        },
+        key,
+        450
+      );
     },
-    [commitWithUpdater]
+    [commitCoalesced]
   );
 
   const rotateSelected90 = useCallback(() => {
@@ -1408,6 +877,9 @@ export default function App() {
     if (clones.length > 0) {
       pasteSeqRef.current = 0;
       setClipboardBundle({ elements: clones, rootIds: rootCloneIds });
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        void navigator.clipboard.writeText(`${INTERNAL_CLIPBOARD_PREFIX}${Date.now()}`).catch(() => {});
+      }
     }
   }, [canvasHeight, canvasWidth, elementsRef, selectedId, selectedIds]);
 
@@ -1481,6 +953,7 @@ export default function App() {
       const idx = prev.findIndex((e) => e.id === id);
       const targetIdx = idx + dir;
       if (idx === -1 || targetIdx < 0 || targetIdx >= prev.length) return prev;
+      if (prev[idx].locked || prev[targetIdx].locked) return prev;
       const copy = [...prev];
       const temp = copy[idx];
       copy[idx] = copy[targetIdx];
@@ -1507,27 +980,75 @@ export default function App() {
   }, [canvasHeight, canvasWidth, commitElements, elementsRef, selectedId, selectedIds]);
 
   const deleteSelected = useCallback(() => {
-    const idsToDelete = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
-    if (idsToDelete.length === 0) return;
-    const next = elementsRef.current.filter(
-      (e) => !idsToDelete.includes(e.id) && (!e.parentId || !idsToDelete.includes(e.parentId))
-    );
+    const requestedIds = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
+    if (requestedIds.length === 0) return;
+    const current = elementsRef.current;
+    const byId = new Map(current.map((e) => [e.id, e]));
+    const childrenMap = new Map<string, DesignElement[]>();
+    for (const e of current) {
+      if (!e.parentId) continue;
+      const list = childrenMap.get(e.parentId);
+      if (list) list.push(e);
+      else childrenMap.set(e.parentId, [e]);
+    }
+    const hasLockedInSubtree = (rootId: string): boolean => {
+      const root = byId.get(rootId);
+      if (!root) return false;
+      if (root.locked) return true;
+      const visited = new Set<string>([rootId]);
+      const queue = [...(childrenMap.get(rootId) || [])];
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        if (visited.has(cur.id)) continue;
+        visited.add(cur.id);
+        if (cur.locked) return true;
+        const ch = childrenMap.get(cur.id);
+        if (ch) queue.push(...ch);
+      }
+      return false;
+    };
+    const deletableRoots = requestedIds.filter((id) => {
+      const el = byId.get(id);
+      if (!el || el.locked) return false;
+      return !hasLockedInSubtree(id);
+    });
+    if (deletableRoots.length === 0) {
+      flashSaveNotice('Locked elements cannot be deleted. Unlock them first.', 2800);
+      return;
+    }
+    const removeSet = new Set<string>(deletableRoots);
+    let added = true;
+    while (added) {
+      added = false;
+      for (const e of current) {
+        if (!removeSet.has(e.id) && e.parentId && removeSet.has(e.parentId)) {
+          removeSet.add(e.id);
+          added = true;
+        }
+      }
+    }
+    const next = current.filter((e) => !removeSet.has(e.id));
     commitElements(next);
+    if (deletableRoots.length < requestedIds.length) {
+      flashSaveNotice('Some locked items were preserved.', 2600);
+    }
     setSelectedId(next[0]?.id || null);
     setSelectedIds(next[0] ? [next[0].id] : []);
-  }, [commitElements, elementsRef, selectedId, selectedIds]);
+  }, [commitElements, elementsRef, flashSaveNotice, selectedId, selectedIds]);
 
   const adjustZIndex = useCallback(
     (delta: number) => {
       const targetIds = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
       if (targetIds.length === 0) return;
-      commitWithUpdater((prev) =>
-        prev.map((el) =>
-          targetIds.includes(el.id)
-            ? { ...el, zIndex: Math.max(1, Math.min(99, (el.zIndex ?? 10) + delta)) }
-            : el
-        )
-      );
+      commitWithUpdater((prev) => {
+        let changed = false;
+        const next = prev.map((el) => {
+          if (!targetIds.includes(el.id) || el.locked) return el;
+          changed = true;
+          return { ...el, zIndex: Math.max(1, Math.min(99, (el.zIndex ?? 10) + delta)) };
+        });
+        return changed ? next : prev;
+      });
     },
     [commitWithUpdater, selectedId, selectedIds]
   );
@@ -1537,9 +1058,13 @@ export default function App() {
     if (targetIds.length === 0) return;
     commitWithUpdater((prev) => {
       const maxZ = prev.reduce((m, e) => Math.max(m, e.zIndex ?? 10), 10);
-      return prev.map((el) =>
-        targetIds.includes(el.id) ? { ...el, zIndex: Math.min(99, maxZ + 1) } : el
-      );
+      let changed = false;
+      const next = prev.map((el) => {
+        if (!targetIds.includes(el.id) || el.locked) return el;
+        changed = true;
+        return { ...el, zIndex: Math.min(99, maxZ + 1) };
+      });
+      return changed ? next : prev;
     });
   }, [commitWithUpdater, selectedId, selectedIds]);
 
@@ -1549,53 +1074,59 @@ export default function App() {
     commitWithUpdater((prev) => {
       const minZ = prev.reduce((m, e) => Math.min(m, e.zIndex ?? 10), 10);
       const nextZ = Math.max(1, minZ - 1);
-      return prev.map((el) => (targetIds.includes(el.id) ? { ...el, zIndex: nextZ } : el));
+      let changed = false;
+      const next = prev.map((el) => {
+        if (!targetIds.includes(el.id) || el.locked) return el;
+        changed = true;
+        return { ...el, zIndex: nextZ };
+      });
+      return changed ? next : prev;
     });
   }, [commitWithUpdater, selectedId, selectedIds]);
 
   const ungroupSelected = useCallback(() => {
-    if (!selectedElement) return;
+    if (!selectedElement || selectedElement.locked) return;
     if (isPureContainerType(selectedElement.type)) {
-      const hasChildren = elementsRef.current.some((e) => e.parentId === selectedElement.id);
+      const hasChildren = elementsRef.current.some(
+        (e) => e.parentId === selectedElement.id && !e.locked
+      );
       if (hasChildren) {
-        commitWithUpdater((prev) =>
-          prev.map((el) => {
-            if (el.parentId !== selectedElement.id) return el;
+        commitWithUpdater((prev) => {
+          let changed = false;
+          const next = prev.map((el) => {
+            if (el.parentId !== selectedElement.id || el.locked) return el;
+            changed = true;
+            const origin = getElementCanvasOrigin(el, prev);
             return {
               ...el,
               parentId: null,
               parentPaneIndex: undefined,
-              x: Math.min(
-                canvasWidth - el.width,
-                Math.max(0, selectedElement.x + (el.childOffsetX ?? 20))
-              ),
-              y: Math.min(
-                canvasHeight - el.height,
-                Math.max(0, selectedElement.y + (el.childOffsetY ?? 20))
-              ),
+              x: Math.min(Math.max(0, canvasWidth - el.width), Math.max(0, origin.x)),
+              y: Math.min(Math.max(0, canvasHeight - el.height), Math.max(0, origin.y)),
               childOffsetX: undefined,
               childOffsetY: undefined,
             };
-          })
-        );
+          });
+          return changed ? next : prev;
+        });
         return;
       }
     }
     if (selectedElement.parentId) {
       commitWithUpdater((prev) => {
-        const parent = prev.find((e) => e.id === selectedElement.parentId);
+        const target = prev.find((e) => e.id === selectedElement.id);
+        if (!target || target.locked) return prev;
+        const parent = prev.find((e) => e.id === target.parentId);
+        if (parent?.locked) return prev;
+        const origin = getElementCanvasOrigin(target, prev);
         return prev.map((el) =>
           el.id === selectedElement.id
             ? {
                 ...el,
                 parentId: null,
                 parentPaneIndex: undefined,
-                x: parent
-                  ? Math.min(canvasWidth - el.width, Math.max(0, parent.x + (el.childOffsetX ?? 20)))
-                  : el.x,
-                y: parent
-                  ? Math.min(canvasHeight - el.height, Math.max(0, parent.y + (el.childOffsetY ?? 20)))
-                  : el.y,
+                x: Math.min(Math.max(0, canvasWidth - el.width), Math.max(0, origin.x)),
+                y: Math.min(Math.max(0, canvasHeight - el.height), Math.max(0, origin.y)),
                 childOffsetX: undefined,
                 childOffsetY: undefined,
               }
@@ -1606,26 +1137,28 @@ export default function App() {
   }, [canvasHeight, canvasWidth, commitWithUpdater, elementsRef, selectedElement]);
 
   const nestElementIntoContainer = (childId: string, parentId: string | null) => {
+    const child = elements.find((e) => e.id === childId);
+    if (!child || child.locked) return;
     if (!parentId) {
-      updateSelected({ parentId: null, parentPaneIndex: undefined });
+      popOutFromContainer(childId);
       return;
     }
     const parent = elements.find((e) => e.id === parentId);
-    const child = elements.find((e) => e.id === childId);
-    if (!parent || !child) return;
+    if (!parent || parent.locked) return;
 
-    const { bL, bT, innerW, innerH } = getInnerBoxGeometry(parent);
+    const parentOrigin = getElementCanvasOrigin(parent, elements);
+    const childOrigin = getElementCanvasOrigin(child, elements);
     const cw = child.childCustomWidth || child.width;
     const ch = child.childCustomHeight || child.height;
-    const rawRelX = Math.round(child.x - parent.x - bL);
-    const rawRelY = Math.round(child.y - parent.y - bT);
-    const insideX = rawRelX >= -20 && rawRelX <= innerW && rawRelY >= -20 && rawRelY <= innerH;
-    const initX = insideX
-      ? Math.max(0, Math.min(Math.max(0, innerW - cw), rawRelX))
-      : Math.min(12, Math.max(0, Math.round((innerW - cw) / 2)));
-    const initY = insideX
-      ? Math.max(0, Math.min(Math.max(0, innerH - ch), rawRelY))
-      : Math.min(12, Math.max(0, Math.round((innerH - ch) / 2)));
+    const resolved = resolvePointInContainer(
+      parent,
+      childOrigin.x,
+      childOrigin.y,
+      cw,
+      ch,
+      parentOrigin.x,
+      parentOrigin.y
+    );
 
     commitWithUpdater((prev) =>
       prev.map((el) => {
@@ -1636,11 +1169,11 @@ export default function App() {
           return {
             ...el,
             parentId,
-            parentPaneIndex: 0,
-            childOffsetX: initX,
-            childOffsetY: initY,
-            x: initX,
-            y: initY,
+            parentPaneIndex: resolved.paneIdx,
+            childOffsetX: resolved.offsetX,
+            childOffsetY: resolved.offsetY,
+            x: resolved.offsetX,
+            y: resolved.offsetY,
           };
         }
         return el;
@@ -1651,14 +1184,12 @@ export default function App() {
   const popOutFromContainer = (childId: string) => {
     commitWithUpdater((prev) => {
       const child = prev.find((e) => e.id === childId);
-      if (!child || !child.parentId) return prev;
+      if (!child || !child.parentId || child.locked) return prev;
       const parent = prev.find((e) => e.id === child.parentId);
-      const newX = parent
-        ? Math.min(canvasWidth - child.width, Math.max(0, parent.x + (child.childOffsetX ?? 20)))
-        : child.x;
-      const newY = parent
-        ? Math.min(canvasHeight - child.height, Math.max(0, parent.y + (child.childOffsetY ?? 20)))
-        : child.y;
+      if (parent?.locked) return prev;
+      const origin = getElementCanvasOrigin(child, prev);
+      const newX = Math.min(Math.max(0, canvasWidth - child.width), Math.max(0, origin.x));
+      const newY = Math.min(Math.max(0, canvasHeight - child.height), Math.max(0, origin.y));
       return prev.map((e) =>
         e.id === childId
           ? {
@@ -1677,6 +1208,8 @@ export default function App() {
 
   const reorderNestedChild = (parentId: string, childId: string, direction: 'up' | 'down') => {
     commitWithUpdater((prev) => {
+      const parent = prev.find((e) => e.id === parentId);
+      if (parent?.locked) return prev;
       const children = prev.filter((e) => e.parentId === parentId);
       const cIdx = children.findIndex((e) => e.id === childId);
       if (cIdx === -1) return prev;
@@ -1684,6 +1217,7 @@ export default function App() {
       if (targetIdx < 0 || targetIdx >= children.length) return prev;
 
       const swappedChild = children[targetIdx];
+      if (children[cIdx].locked || swappedChild.locked) return prev;
       const originalFirstIdx = prev.findIndex((e) => e.id === childId);
       const originalSecondIdx = prev.findIndex((e) => e.id === swappedChild.id);
       const next = [...prev];
@@ -1697,6 +1231,10 @@ export default function App() {
   const enterContainerIsolation = (containerId: string) => {
     const parent = elements.find((e) => e.id === containerId);
     if (!parent) return;
+    if (parent.locked) {
+      flashSaveNotice('Unlock this container before editing inside it.', 2500);
+      return;
+    }
     let changed = parent.containerLayout !== 'freeform_offset';
     let yCursor = 12;
     const next = elements.map((el) => {
@@ -1720,7 +1258,7 @@ export default function App() {
   };
 
   const applyQuickModifier = (kind: ModifierKind, extraPatch?: Record<string, unknown>) => {
-    if (!selectedElement) return;
+    if (!selectedElement || selectedElement.locked) return;
     const newMod = {
       ...createDefaultModifier(kind, selectedElement),
       ...(extraPatch || {}),
@@ -1750,6 +1288,10 @@ export default function App() {
       (a, b) => (a.zIndex ?? 10) - (b.zIndex ?? 10) || a.order - b.order
     );
     const [base, cutter] = sorted;
+    if (base.locked || cutter.locked) {
+      flashSaveNotice('Unlock elements before applying Boolean cutout.', 2500);
+      return;
+    }
     const xPct = Math.max(0, Math.min(100, Math.round(((cutter.x + cutter.width / 2 - base.x) / Math.max(1, base.width)) * 100)));
     const yPct = Math.max(0, Math.min(100, Math.round(((cutter.y + cutter.height / 2 - base.y) / Math.max(1, base.height)) * 100)));
     const cutterShape = cutter.boxClipShape || cutter.imageShape;
@@ -1824,6 +1366,10 @@ export default function App() {
   const joinSelectedWithSplit = () => {
     const selected = elements.filter((e) => selectedIds.includes(e.id));
     if (selected.length < 2 || selected.length > 3) return;
+    if (selected.some((e) => e.locked)) {
+      flashSaveNotice('Unlock selected elements before joining into a Split Box.', 2500);
+      return;
+    }
     const sortedByX = [...selected].sort((a, b) => a.x - b.x);
     const minX = Math.min(...selected.map((e) => e.x));
     const minY = Math.min(...selected.map((e) => e.y));
@@ -2151,6 +1697,7 @@ export default function App() {
   };
 
   const applyTemplatePreset = (preset: TemplatePreset) => {
+    if (!confirmDiscardIfDirty('load this template')) return;
     setPlatform(preset.platform);
     setCanvasBg(preset.canvasBg);
     setSwatches(preset.swatches);
@@ -2166,6 +1713,11 @@ export default function App() {
   const handleLocalImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (selectedElement?.locked) {
+      flashSaveNotice('Unlock element before replacing its image.', 2500);
+      e.target.value = '';
+      return;
+    }
     setUploadingImage(true);
     setUploadNotice('Processing local image...');
 
@@ -2236,6 +1788,84 @@ export default function App() {
     void handleExportHtmlFile(computeLatestExportHtml());
   };
 
+  const resolveInsertionCoords = useCallback(
+    (w: number, h: number, atX?: number, atY?: number) => {
+      const tracker = cursorTracker.get();
+      const rawX = atX !== undefined ? atX : tracker.inside ? tracker.x : Math.round(canvasWidth / 2);
+      const rawY = atY !== undefined ? atY : tracker.inside ? tracker.y : Math.round(canvasHeight / 2);
+      return {
+        x: Math.max(0, Math.min(Math.max(0, canvasWidth - w), Math.round(rawX - w / 2))),
+        y: Math.max(0, Math.min(Math.max(0, canvasHeight - h), Math.round(rawY - h / 2))),
+      };
+    },
+    [canvasHeight, canvasWidth, cursorTracker]
+  );
+
+  const insertImageElementAt = useCallback(
+    (url: string, label: string, atX?: number, atY?: number) => {
+      const current = elementsRef.current;
+      const base = buildDefaultElement('image', current, uiTheme, editingContainer);
+      const coords = resolveInsertionCoords(base.width, base.height, atX, atY);
+      const placed: DesignElement = base.parentId
+        ? { ...base, url, label }
+        : { ...base, url, label, x: coords.x, y: coords.y };
+      commitElements([...current, placed]);
+      setSelectedId(placed.id);
+      setSelectedIds([placed.id]);
+    },
+    [commitElements, editingContainer, elementsRef, resolveInsertionCoords, uiTheme]
+  );
+
+  const insertPlainTextElementAt = useCallback(
+    (text: string, atX?: number, atY?: number) => {
+      const current = elementsRef.current;
+      const base = buildDefaultElement('pure_paragraph', current, uiTheme, editingContainer);
+      const coords = resolveInsertionCoords(base.width, base.height, atX, atY);
+      const placed: DesignElement = base.parentId
+        ? { ...base, content: text }
+        : { ...base, content: text, x: coords.x, y: coords.y };
+      commitElements([...current, placed]);
+      setSelectedId(placed.id);
+      setSelectedIds([placed.id]);
+      flashSaveNotice('Pasted text box onto canvas.', 2200);
+    },
+    [commitElements, editingContainer, elementsRef, flashSaveNotice, resolveInsertionCoords, uiTheme]
+  );
+
+  const handleDropOrPasteImageUrl = useCallback(
+    (url: string, atX?: number, atY?: number) => {
+      insertImageElementAt(url, 'Image Layer', atX, atY);
+      flashSaveNotice('Inserted image link onto canvas.', 2200);
+    },
+    [flashSaveNotice, insertImageElementAt]
+  );
+
+  const handleDropOrPasteImageFile = useCallback(
+    async (file: File, atX?: number, atY?: number) => {
+      setUploadingImage(true);
+      setUploadNotice('Processing image for canvas...');
+      try {
+        const result = await processLocalImageFile(file, imgbbApiKey);
+        const cleanName = file.name.replace(/\.[^.]+$/, '') || 'Pasted Image';
+        insertImageElementAt(result.url, cleanName, atX, atY);
+        if (result.source === 'imgbb') {
+          flashSaveNotice(`Uploaded ${cleanName} to ImgBB.`, 2600);
+        } else {
+          flashSaveNotice(`Inserted ${cleanName} (offline DataURL).`, 2600);
+        }
+      } catch (err: unknown) {
+        flashSaveNotice(
+          err instanceof Error ? err.message : 'Could not insert image file.',
+          3000
+        );
+      } finally {
+        setUploadingImage(false);
+        setUploadNotice(null);
+      }
+    },
+    [flashSaveNotice, imgbbApiKey, insertImageElementAt]
+  );
+
   const saveImgbbKey = (val: string) => {
     setImgbbApiKey(val);
     localStorage.setItem('dbx_imgbb_key', val);
@@ -2268,6 +1898,9 @@ export default function App() {
   // Global Keyboard Shortcuts (Customizable Keybindings + Native Desktop Actions)
   useEffect(() => {
     const handleEscapeHierarchy = (): boolean => {
+      if (cancelActiveGesture()) {
+        return true;
+      }
       if (inlineEditId) {
         setInlineEditId(null);
         return true;
@@ -2420,7 +2053,9 @@ export default function App() {
         return;
       }
       if (matchesShortcut(e, keybindings.paste)) {
-        if (clipboardBundle) {
+        const normalizedBinding = keybindings.paste.trim().toLowerCase();
+        const isStandardPaste = normalizedBinding === 'ctrl+v' || normalizedBinding === 'meta+v';
+        if (!isStandardPaste && clipboardBundle) {
           e.preventDefault();
           pasteClipboardElement();
         }
@@ -2561,15 +2196,44 @@ export default function App() {
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
         const targetIds = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
-        commitWithUpdater((prev) =>
-          prev.map((el) => {
-            if (!targetIds.includes(el.id) || el.locked) return el;
-            return {
-              ...el,
-              x: Math.max(0, Math.min(canvasWidth - el.width, el.x + dx)),
-              y: Math.max(0, Math.min(canvasHeight - el.height, el.y + dy)),
-            };
-          })
+        commitCoalesced(
+          (prev) => {
+            const byId = new Map(prev.map((item) => [item.id, item]));
+            const parentIdsToFreeform = new Set<string>();
+            let changed = false;
+            const moved = prev.map((el) => {
+              if (!targetIds.includes(el.id) || el.locked) return el;
+              if (el.parentId) {
+                const parent = byId.get(el.parentId);
+                if (!parent || parent.locked) return el;
+                const pRect = getSplitPaneGeometry(parent, el.parentPaneIndex ?? 0);
+                const w = el.childCustomWidth || el.width;
+                const h = el.childCustomHeight || el.height;
+                const nx = Math.max(0, Math.min(Math.max(0, pRect.paneW - w), (el.childOffsetX ?? 12) + dx));
+                const ny = Math.max(0, Math.min(Math.max(0, pRect.paneH - h), (el.childOffsetY ?? 12) + dy));
+                if (nx === (el.childOffsetX ?? 12) && ny === (el.childOffsetY ?? 12)) return el;
+                if (parent.containerLayout !== 'freeform_offset') {
+                  parentIdsToFreeform.add(parent.id);
+                }
+                changed = true;
+                return { ...el, childOffsetX: nx, childOffsetY: ny, x: nx, y: ny };
+              }
+              const nx = Math.max(0, Math.min(canvasWidth - el.width, el.x + dx));
+              const ny = Math.max(0, Math.min(canvasHeight - el.height, el.y + dy));
+              if (nx === el.x && ny === el.y) return el;
+              changed = true;
+              return { ...el, x: nx, y: ny };
+            });
+            if (!changed) return prev;
+            if (parentIdsToFreeform.size === 0) return moved;
+            return moved.map((el) =>
+              parentIdsToFreeform.has(el.id)
+                ? { ...el, containerLayout: 'freeform_offset' as const }
+                : el
+            );
+          },
+          `nudge:${targetIds.join(',')}`,
+          500
         );
       }
     };
@@ -2588,13 +2252,114 @@ export default function App() {
       }
     };
 
+    const onPaste = (e: ClipboardEvent) => {
+      const targetEl = e.target as HTMLElement | null;
+      const tag = targetEl?.tagName;
+      const isEditableFocused =
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        Boolean(targetEl?.isContentEditable);
+      if (
+        isEditableFocused ||
+        inlineEditId ||
+        spotlightOpen ||
+        showLivePreviewModal ||
+        showSettingsModal ||
+        showObjectForgeModal ||
+        showHtmlImporterModal ||
+        showTemplatesModal
+      ) {
+        return;
+      }
+
+      const dt = e.clipboardData;
+      if (!dt) {
+        if (clipboardBundle) {
+          e.preventDefault();
+          pasteClipboardElement();
+        }
+        return;
+      }
+
+      const files = dt.files ? Array.from(dt.files) : [];
+      let imageFile = files.find((f) => f.type.startsWith('image/')) || null;
+      if (!imageFile && dt.items) {
+        for (const item of Array.from(dt.items)) {
+          if (item.kind === 'file' && item.type.startsWith('image/')) {
+            const candidate = item.getAsFile();
+            if (candidate) {
+              imageFile = candidate;
+              break;
+            }
+          }
+        }
+      }
+      if (imageFile) {
+        e.preventDefault();
+        void handleDropOrPasteImageFile(imageFile);
+        return;
+      }
+
+      const plainText = dt.getData('text/plain') || '';
+      const htmlText = dt.getData('text/html') || '';
+      const classified = classifyPastedPayload(plainText, htmlText);
+
+      if (classified.kind === 'internal' || (classified.kind === 'empty' && clipboardBundle)) {
+        if (clipboardBundle) {
+          e.preventDefault();
+          pasteClipboardElement();
+        }
+        return;
+      }
+
+      if (classified.kind === 'image_url') {
+        e.preventDefault();
+        handleDropOrPasteImageUrl(classified.url);
+        return;
+      }
+
+      if (classified.kind === 'html_snippet') {
+        const current = elementsRef.current;
+        const maxRowIndex = current.reduce((m, el) => Math.max(m, el.rowIndex), 0);
+        const maxBottomY = current.reduce(
+          (m, el) => (el.parentId ? m : Math.max(m, el.y + el.height)),
+          24
+        );
+        const parsed = parseToyhouseHtmlToDesign(classified.html, {
+          uiTheme,
+          canvasWidth,
+          startRowIndex: current.length > 0 ? maxRowIndex + 1 : 0,
+          startY: current.length > 0 ? Math.max(24, maxBottomY + 20) : 24,
+        });
+        if (parsed.elements.length > 0) {
+          e.preventDefault();
+          const nextElements = [...current, ...parsed.elements];
+          commitElements(nextElements);
+          const firstId = parsed.elements[0]?.id || null;
+          setSelectedId(firstId);
+          setSelectedIds(firstId ? [firstId] : []);
+          setEditingContainerId(null);
+          flashSaveNotice(`Pasted ${parsed.elements.length} element(s) from HTML.`, 2400);
+          return;
+        }
+      }
+
+      if (classified.kind === 'plain_text') {
+        e.preventDefault();
+        insertPlainTextElementAt(classified.text);
+      }
+    };
+
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('paste', onPaste);
     window.addEventListener('blur', onBlur);
     window.addEventListener('message', onIframeMessage);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('paste', onPaste);
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('message', onIframeMessage);
     };
@@ -2603,24 +2368,31 @@ export default function App() {
     adjustZIndex,
     bottomDockOpen,
     bringToFront,
+    cancelActiveGesture,
     canvasHeight,
     canvasTool,
     canvasWidth,
     clipboardBundle,
-    commitWithUpdater,
+    commitCoalesced,
+    commitElements,
     copySelectedElements,
     copySelectedStyle,
     deleteSelected,
     duplicateSelected,
     editingContainerId,
+    elementsRef,
     fitCanvasToView,
+    flashSaveNotice,
     flipSelected,
     groupSelectedIntoBox,
     handleCopyCode,
+    handleDropOrPasteImageFile,
+    handleDropOrPasteImageUrl,
     handleOpenProject,
     handleSaveProject,
     handleSaveProjectAs,
     inlineEditId,
+    insertPlainTextElementAt,
     keybindings,
     layoutMode,
     leftCollapsed,
@@ -2646,6 +2418,7 @@ export default function App() {
     spotlightOpen,
     studioPrefs.nudgeStepPx,
     studioPrefs.shiftNudgeStepPx,
+    uiTheme,
     undo,
     ungroupSelected,
   ]);
@@ -2672,7 +2445,9 @@ export default function App() {
       data-ui-density={studioPrefs.uiDensity}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
+      onPointerCancel={() => {
+        cancelActiveGesture();
+      }}
     >
       <input
         ref={fileInputRef}
@@ -2710,6 +2485,7 @@ export default function App() {
         onOpenObjectForge={() => setShowObjectForgeModal(true)}
         onOpenHtmlImporter={() => setShowHtmlImporterModal(true)}
         onOpenTemplates={() => setShowTemplatesModal(true)}
+        onOpenSpotlight={() => setSpotlightOpen(true)}
         onOpenProject={() => {
           void handleOpenProject();
         }}
@@ -2725,6 +2501,7 @@ export default function App() {
         onSaveProjectAs={() => {
           void handleSaveProjectAs();
         }}
+        onExportHtml={handleExportHtml}
         onOpenShortcuts={() => {
           setSettingsInitialTab('shortcuts');
           setShowSettingsModal(true);
@@ -2799,10 +2576,14 @@ export default function App() {
               setSelectedIds([elId]);
             }
           }}
-          onStartEditingLayerName={(elId) => setEditingLayerId(elId)}
+          onStartEditingLayerName={(elId) => {
+            const target = elementsRef.current.find((e) => e.id === elId);
+            if (!target || target.locked) return;
+            setEditingLayerId(elId);
+          }}
           onTransientRenameLayer={(elId, label) =>
             replaceElementsTransient((prev) =>
-              prev.map((item) => (item.id === elId ? { ...item, label } : item))
+              prev.map((item) => (item.id === elId && !item.locked ? { ...item, label } : item))
             )
           }
           onCommitLayerRename={() => {
@@ -2833,8 +2614,7 @@ export default function App() {
           panOffset={panOffset}
           canvasScreenLeft={canvasScreenLeft}
           canvasScreenTop={canvasScreenTop}
-          cursorCoords={cursorCoords}
-          cursorInViewport={cursorInViewport}
+          cursorTracker={cursorTracker}
           isSpacePressed={isSpacePressed}
           panDrag={panDrag}
           dragState={dragState}
@@ -2872,6 +2652,10 @@ export default function App() {
           spotlightOpen={spotlightOpen}
           onToggleSpotlight={setSpotlightOpen}
           onAddCatalogItemAtPosition={addCatalogItemAtPosition}
+          onDropImageFile={(file, x, y) => {
+            void handleDropOrPasteImageFile(file, x, y);
+          }}
+          onDropImageUrl={handleDropOrPasteImageUrl}
           onAdjustZIndex={adjustZIndex}
           onBringToFront={bringToFront}
           onSendToBack={sendToBack}
@@ -2913,7 +2697,6 @@ export default function App() {
           }}
           onEnterContainerIsolation={enterContainerIsolation}
           onApplyQuickModifier={applyQuickModifier}
-          onSetCursorInViewport={setCursorInViewport}
           onSetPanDrag={setPanDrag}
           onSetMarqueeSelect={setMarqueeSelect}
           onSetDrawMarquee={setDrawMarquee}
@@ -3072,7 +2855,12 @@ export default function App() {
         localSnapshots={localSnapshots}
         onClose={() => setShowTemplatesModal(false)}
         onNewBlankCanvas={handleNewBlankCanvas}
+        onNewBlankWithSize={handleNewBlankWithSize}
         onApplyPreset={applyTemplatePreset}
+        onOpenHtmlImporter={() => setShowHtmlImporterModal(true)}
+        onOpenProject={() => {
+          void handleOpenProject();
+        }}
         onOpenRecentProject={(path) => {
           void handleOpenRecentProject(path);
           setShowTemplatesModal(false);
@@ -3115,9 +2903,14 @@ export default function App() {
         layoutMode={layoutMode}
         canvasWidth={canvasWidth}
         canvasHeight={canvasHeight}
+        elements={elements}
+        canvasBg={canvasBg}
+        cuteThemeBg={studioPrefs.cuteThemeColors.bgApp}
         previewSurface={previewSurface}
         previewViewport={previewViewport}
         previewSrcDoc={previewSrcDoc}
+        compareNightSrcDoc={compareNightSrcDoc}
+        compareLightSrcDoc={compareLightSrcDoc}
         toyhouseShell={previewToyhouseShell}
         onToggleToyhouseShell={() => setPreviewToyhouseShell((v) => !v)}
         onChangeSurface={setPreviewSurface}

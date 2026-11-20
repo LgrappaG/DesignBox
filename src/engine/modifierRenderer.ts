@@ -7,6 +7,7 @@ import {
   InnerFrameModifier,
   SplitModifier,
 } from '../types/schema';
+import { hexToRgb, parseColorValue } from '../utils/colorMath';
 
 export function isModifierProOnly(
   mod: ElementModifier,
@@ -41,6 +42,7 @@ export function elementHasProModifiers(el: DesignElement): boolean {
 }
 
 export function canUseF2UBackgroundPunch(el: DesignElement): boolean {
+  if (el.overflowX === 'visible' || el.overflowY === 'visible') return false;
   const mods = (el.modifiers || []).filter((m) => m.enabled);
   const holes = mods.filter(
     (m): m is CutoutHoleModifier =>
@@ -182,10 +184,11 @@ function renderSvgShape(
   }
   if (shape === 'arch') {
     const r = Math.min(w / 2, h * 0.52);
+    const rx = w / 2;
     const d = [
       `M ${x.toFixed(1)} ${(y + h).toFixed(1)}`,
       `L ${x.toFixed(1)} ${(y + r).toFixed(1)}`,
-      `A ${r.toFixed(1)} ${r.toFixed(1)} 0 0 1 ${(x + w).toFixed(1)} ${(y + r).toFixed(1)}`,
+      `A ${rx.toFixed(1)} ${r.toFixed(1)} 0 0 1 ${(x + w).toFixed(1)} ${(y + r).toFixed(1)}`,
       `L ${(x + w).toFixed(1)} ${(y + h).toFixed(1)} Z`,
     ].join(' ');
     return `<path d="${d}" fill="${fill}"${rotAttr}/>`;
@@ -258,24 +261,13 @@ export function buildSvgMaskStyle(el: DesignElement): {
   const intersectMasks = masks.filter((m) => m.operation === 'intersect');
   const subtractMasks = masks.filter((m) => m.operation === 'subtract');
 
-  const svgParts: string[] = [];
-  if (intersectMasks.length > 0) {
-    svgParts.push(`<rect x="0" y="0" width="${w}" height="${h}" fill="black"/>`);
-    for (const m of intersectMasks) {
-      const cx = (m.xPct / 100) * w;
-      const cy = (m.yPct / 100) * h;
-      svgParts.push(
-        renderSvgShape(m.maskShape, cx, cy, m.widthPx, m.heightPx, 'white', m.rotation || 0)
-      );
-    }
-  } else {
-    svgParts.push(`<rect x="0" y="0" width="${w}" height="${h}" fill="white"/>`);
-  }
+  const defsParts: string[] = [];
+  const subtractAndHoleParts: string[] = [];
 
   for (const m of subtractMasks) {
     const cx = (m.xPct / 100) * w;
     const cy = (m.yPct / 100) * h;
-    svgParts.push(
+    subtractAndHoleParts.push(
       renderSvgShape(m.maskShape, cx, cy, m.widthPx, m.heightPx, 'black', m.rotation || 0)
     );
   }
@@ -284,10 +276,10 @@ export function buildSvgMaskStyle(el: DesignElement): {
   for (const hole of holes) {
     if (hole.shape === 'ticket_corners') {
       const r = Math.max(6, Math.round(hole.widthPx / 2));
-      svgParts.push(`<circle cx="0" cy="0" r="${r}" fill="black"/>`);
-      svgParts.push(`<circle cx="${w}" cy="0" r="${r}" fill="black"/>`);
-      svgParts.push(`<circle cx="${w}" cy="${h}" r="${r}" fill="black"/>`);
-      svgParts.push(`<circle cx="0" cy="${h}" r="${r}" fill="black"/>`);
+      subtractAndHoleParts.push(`<circle cx="0" cy="0" r="${r}" fill="black"/>`);
+      subtractAndHoleParts.push(`<circle cx="${w}" cy="0" r="${r}" fill="black"/>`);
+      subtractAndHoleParts.push(`<circle cx="${w}" cy="${h}" r="${r}" fill="black"/>`);
+      subtractAndHoleParts.push(`<circle cx="0" cy="${h}" r="${r}" fill="black"/>`);
       continue;
     }
 
@@ -295,7 +287,7 @@ export function buildSvgMaskStyle(el: DesignElement): {
     const cy = (hole.yPct / 100) * h;
     const hw = Math.max(8, hole.widthPx);
     const hh = hole.shape === 'circle' ? hw : Math.max(8, hole.heightPx);
-    svgParts.push(renderSvgShape(hole.shape, cx, cy, hw, hh, 'black'));
+    subtractAndHoleParts.push(renderSvgShape(hole.shape, cx, cy, hw, hh, 'black'));
 
     if (hole.ringWidth > 0) {
       const radiusCss = getHoleRadiusCss(hole.shape, hw, hh);
@@ -305,9 +297,29 @@ export function buildSvgMaskStyle(el: DesignElement): {
     }
   }
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${svgParts.join('')}</svg>`;
+  // Use SVG <mask> elements so luminance inside each mask drives the output alpha channel
+  // (CSS mask-image defaults to mask-mode: alpha across all browsers) and multiple intersects compose as A ∩ B.
+  let maskedContent = `<rect x="0" y="0" width="${w}" height="${h}" fill="white"/>`;
+  intersectMasks.forEach((m, idx) => {
+    const cx = (m.xPct / 100) * w;
+    const cy = (m.yPct / 100) * h;
+    const shapeSvg = renderSvgShape(m.maskShape, cx, cy, m.widthPx, m.heightPx, 'white', m.rotation || 0);
+    defsParts.push(
+      `<mask id="mi${idx}"><rect x="0" y="0" width="${w}" height="${h}" fill="black"/>${shapeSvg}</mask>`
+    );
+    maskedContent = `<g mask="url(#mi${idx})">${maskedContent}</g>`;
+  });
+
+  if (subtractAndHoleParts.length > 0) {
+    defsParts.push(
+      `<mask id="msub"><rect x="0" y="0" width="${w}" height="${h}" fill="white"/>${subtractAndHoleParts.join('')}</mask>`
+    );
+    maskedContent = `<g mask="url(#msub)">${maskedContent}</g>`;
+  }
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs>${defsParts.join('')}</defs>${maskedContent}</svg>`;
   const encoded = encodeURIComponent(svg);
-  const maskCss = `-webkit-mask-image: url("data:image/svg+xml,${encoded}"); mask-image: url("data:image/svg+xml,${encoded}"); -webkit-mask-size: 100% 100%; mask-size: 100% 100%; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;`;
+  const maskCss = `-webkit-mask-image: url('data:image/svg+xml,${encoded}'); mask-image: url('data:image/svg+xml,${encoded}'); -webkit-mask-size: 100% 100%; mask-size: 100% 100%; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;`;
 
   return {
     maskCss,
@@ -476,10 +488,22 @@ export function renderSplitModifierHTML(
         rawBg && rawBg !== 'inherit' && rawBg !== 'transparent'
           ? `background-color: ${rawBg}; `
           : '';
-      const autoTextColor =
-        rawBg && /^#(0|1|2|3)/i.test(rawBg) && (!el.textColor || el.textColor === '#1F2937' || el.textColor === '#18181B')
-          ? 'color: #FFFFFF; '
-          : '';
+      let autoTextColor = '';
+      if (
+        rawBg &&
+        rawBg !== 'inherit' &&
+        rawBg !== 'transparent' &&
+        (!el.textColor || el.textColor === '#1F2937' || el.textColor === '#18181B')
+      ) {
+        const parsedBg = parseColorValue(rawBg, '#FFFFFF');
+        if (!parsedBg.isTransparent && !parsedBg.isInherit && parsedBg.alpha >= 0.45) {
+          const { r, g, b } = hexToRgb(parsedBg.hex);
+          const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+          if (lum < 0.48) {
+            autoTextColor = 'color: #FFFFFF; ';
+          }
+        }
+      }
 
       const paneChildren = children.filter((c) => {
         const pIdx = c.parentPaneIndex ?? 0;

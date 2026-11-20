@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -6,6 +6,7 @@ import {
   BarChart3,
   BookOpen,
   ChevronDown,
+  ChevronRight,
   Circle,
   CircleDot,
   Columns,
@@ -73,8 +74,10 @@ import {
 } from '../types/schema';
 import { FaIconBrowser } from './shared/FaIconBrowser';
 import { StudioColorButton } from './shared/StudioColorPicker';
+import { buildLayerTree } from '../utils/elementHierarchy';
+import { getSplitPaneGeometry } from '../utils/canvasGeometry';
 
-export type LeftSidebarTab = 'pure' | 'blocks' | 'assets' | 'theme';
+export type LeftSidebarTab = 'elements' | 'assets' | 'theme';
 
 export interface LeftSidebarProps {
   leftCollapsed: boolean;
@@ -224,7 +227,7 @@ function resolvePurePrimitiveIcon(iconName: string) {
   }
 }
 
-export const LeftSidebar: React.FC<LeftSidebarProps> = ({
+export const LeftSidebar: React.FC<LeftSidebarProps> = React.memo(({
   leftCollapsed,
   leftPanelWidth,
   leftLibraryPct,
@@ -270,6 +273,31 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const [draftTheme, setDraftTheme] = useState<GlobalThemePalette>(GLOBAL_THEME_PRESETS[0]);
   const [themeTargetScope, setThemeTargetScope] = useState<'all' | 'selected'>('all');
   const [catalogSearch, setCatalogSearch] = useState('');
+  const [elementsFilter, setElementsFilter] = useState<'all' | 'pure' | 'widgets' | 'custom'>('all');
+  const [collapsedLayerIds, setCollapsedLayerIds] = useState<Set<string>>(() => new Set());
+
+  const byId = useMemo(
+    () => new Map<string, DesignElement>(elements.map((e) => [e.id, e])),
+    [elements]
+  );
+  const indexById = useMemo(() => {
+    const m = new Map<string, number>();
+    elements.forEach((e, idx) => m.set(e.id, idx));
+    return m;
+  }, [elements]);
+  const layerTreeRows = useMemo(
+    () => buildLayerTree(elements, collapsedLayerIds),
+    [elements, collapsedLayerIds]
+  );
+
+  const toggleLayerCollapsed = (containerId: string) => {
+    setCollapsedLayerIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(containerId)) next.delete(containerId);
+      else next.add(containerId);
+      return next;
+    });
+  };
 
   const searchResults = React.useMemo(() => {
     if (!catalogSearch.trim()) return [];
@@ -335,39 +363,25 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
         }}
         className="border-r flex flex-col shrink-0 overflow-hidden"
       >
-        {/* Top Sidebar Tabs */}
+        {/* Top Sidebar Tabs (3 consolidated tabs: Elements | Assets | Theme) */}
         <div
           style={{ borderColor: 'var(--border-main)', backgroundColor: 'var(--bg-panel-alt)' }}
           className="flex items-stretch border-b shrink-0"
         >
-          <div className="flex-1 grid grid-cols-4 min-w-0">
+          <div className="flex-1 grid grid-cols-3 min-w-0">
             <button
               type="button"
-              onClick={() => onChangeLeftTab('pure')}
+              onClick={() => onChangeLeftTab('elements')}
               style={{
-                borderBottomColor: leftSidebarTab === 'pure' ? 'var(--accent)' : 'transparent',
-                color: leftSidebarTab === 'pure' ? 'var(--accent)' : 'var(--text-muted)',
-                backgroundColor: leftSidebarTab === 'pure' ? 'var(--bg-panel)' : 'transparent',
+                borderBottomColor: leftSidebarTab === 'elements' ? 'var(--accent)' : 'transparent',
+                color: leftSidebarTab === 'elements' ? 'var(--accent)' : 'var(--text-muted)',
+                backgroundColor: leftSidebarTab === 'elements' ? 'var(--bg-panel)' : 'transparent',
               }}
               className="flex items-center justify-center gap-1 px-1 py-2 min-w-0 text-[10.5px] font-bold border-b-2 transition"
-              title="Pure Blank Primitives (27)"
-            >
-              <Square className="w-3 h-3 shrink-0" />
-              <span className="truncate">Pure</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onChangeLeftTab('blocks')}
-              style={{
-                borderBottomColor: leftSidebarTab === 'blocks' ? 'var(--accent)' : 'transparent',
-                color: leftSidebarTab === 'blocks' ? 'var(--accent)' : 'var(--text-muted)',
-                backgroundColor: leftSidebarTab === 'blocks' ? 'var(--bg-panel)' : 'transparent',
-              }}
-              className="flex items-center justify-center gap-1 px-1 py-2 min-w-0 text-[10.5px] font-bold border-b-2 transition"
-              title="Core Toyhouse Widgets & Blueprints"
+              title="Pure Primitives, Core Blocks, Toyhouse Widgets & Custom Objects"
             >
               <LayoutGrid className="w-3 h-3 shrink-0" />
-              <span className="truncate">Blocks</span>
+              <span className="truncate">Elements</span>
             </button>
             <button
               type="button"
@@ -521,212 +535,243 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             </div>
           ) : (
             <>
-          {leftSidebarTab === 'blocks' && (
+          {leftSidebarTab === 'elements' && (
             <div
               style={{ height: `${leftLibraryPct}%` }}
               className="p-2.5 overflow-y-auto shrink-0 space-y-3"
             >
-              <div>
-                <div
-                  style={{ color: 'var(--text-muted)' }}
-                  className="text-[10px] font-mono uppercase tracking-wider mb-1.5"
-                >
-                  Core & Layout (14)
-                </div>
-                <div className="grid grid-cols-2 gap-1">
-                  {CORE_BLOCKS.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <button
-                        key={item.type}
-                        draggable
-                        onDragStart={(e) => handleDragStartCatalog(e, { kind: 'element', elementType: item.type })}
-                        onClick={() => onAddElement(item.type)}
-                        style={{
-                          backgroundColor: 'var(--bg-panel-alt)',
-                          borderColor: 'var(--border-main)',
-                        }}
-                        className="flex items-center gap-1.5 px-2 py-1 rounded-[6px] border text-[11px] hover:opacity-85 transition text-left cursor-grab active:cursor-grabbing"
-                      >
-                        <Icon className="w-3 h-3 shrink-0" style={{ color: 'var(--accent)' }} />
-                        <span className="truncate">{item.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <div
-                  style={{ color: 'var(--text-muted)' }}
-                  className="text-[10px] font-mono uppercase tracking-wider mb-1.5"
-                >
-                  Character & Toyhouse Widgets (12)
-                </div>
-                <div className="grid grid-cols-2 gap-1">
-                  {TOYHOUSE_WIDGETS.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <button
-                        key={item.type}
-                        draggable
-                        onDragStart={(e) => handleDragStartCatalog(e, { kind: 'element', elementType: item.type })}
-                        onClick={() => onAddElement(item.type)}
-                        style={{
-                          backgroundColor: 'var(--bg-panel-alt)',
-                          borderColor: 'var(--border-strong)',
-                        }}
-                        className="flex items-center gap-1.5 px-2 py-1 rounded-[6px] border text-[11px] hover:opacity-90 transition text-left cursor-grab active:cursor-grabbing"
-                      >
-                        <Icon className="w-3 h-3 shrink-0" style={{ color: 'var(--accent)' }} />
-                        <span className="truncate">{item.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <div
-                  style={{ color: 'var(--text-muted)' }}
-                  className="text-[10px] font-mono uppercase tracking-wider mb-1.5"
-                >
-                  Scrapbook & Decorative (7)
-                </div>
-                <div className="grid grid-cols-2 gap-1">
-                  {DECORATIVE_BLOCKS.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <button
-                        key={item.type}
-                        draggable
-                        onDragStart={(e) => handleDragStartCatalog(e, { kind: 'element', elementType: item.type })}
-                        onClick={() => onAddElement(item.type)}
-                        style={{
-                          backgroundColor: 'var(--bg-panel-alt)',
-                          borderColor: 'var(--border-main)',
-                        }}
-                        className="flex items-center gap-1.5 px-2 py-1 rounded-[6px] border text-[11px] hover:opacity-90 transition text-left cursor-grab active:cursor-grabbing"
-                      >
-                        <Icon className="w-3 h-3 shrink-0" style={{ color: 'var(--accent)' }} />
-                        <span className="truncate">{item.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <span
-                    style={{ color: 'var(--text-muted)' }}
-                    className="text-[10px] font-mono uppercase tracking-wider"
-                  >
-                    Custom Objects ({customBlueprints.length})
-                  </span>
+              {/* Compact Sub-Filter Pills inside unified Elements Tab */}
+              <div className="flex items-center gap-1">
+                {(
+                  [
+                    { id: 'all', label: 'All' },
+                    { id: 'pure', label: 'Pure' },
+                    { id: 'widgets', label: 'Widgets' },
+                    { id: 'custom', label: `Custom (${customBlueprints.length})` },
+                  ] as const
+                ).map((pill) => (
                   <button
-                    onClick={onOpenObjectForge}
-                    style={{ color: 'var(--accent)' }}
-                    className="text-[10px] font-mono font-bold hover:underline flex items-center gap-0.5"
+                    key={pill.id}
+                    type="button"
+                    onClick={() => setElementsFilter(pill.id)}
+                    style={
+                      elementsFilter === pill.id
+                        ? {
+                            backgroundColor: 'var(--accent)',
+                            color: '#fff',
+                            borderColor: 'var(--accent)',
+                          }
+                        : {
+                            backgroundColor: 'var(--bg-panel-alt)',
+                            borderColor: 'var(--border-main)',
+                            color: 'var(--text-muted)',
+                          }
+                    }
+                    className="flex-1 px-1.5 py-1 rounded-[6px] border text-[10px] font-semibold truncate transition"
                   >
-                    <Plus className="w-3 h-3" /> Build New
+                    {pill.label}
                   </button>
-                </div>
-                <div className="space-y-1">
-                  {customBlueprints.map((bp) => (
-                    <div
-                      key={bp.id}
-                      onClick={() => onAddCustomBlueprint(bp)}
-                      style={{
-                        backgroundColor: 'var(--accent-soft)',
-                        borderColor: 'var(--border-strong)',
-                      }}
-                      className="flex items-center justify-between px-2 py-1.5 rounded-[6px] border text-[11px] cursor-pointer hover:opacity-90 transition group"
-                      title={bp.description}
-                    >
-                      <div className="flex items-center gap-1.5 truncate">
-                        <Cpu className="w-3 h-3 shrink-0" style={{ color: 'var(--accent)' }} />
-                        <span className="font-medium truncate">{bp.name}</span>
+                ))}
+              </div>
+
+              {(elementsFilter === 'all' || elementsFilter === 'pure') && (
+                <div className="space-y-2.5">
+                  {PURE_PRIMITIVE_GROUPS.map((group) => (
+                    <div key={group.id}>
+                      <div
+                        style={{ color: 'var(--text-muted)' }}
+                        className="text-[10px] font-mono uppercase tracking-wider mb-1"
+                        title={group.subtitle}
+                      >
+                        {group.title}
                       </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDeleteCustomBlueprint(bp.id);
-                          }}
-                          className="p-1 text-stone-400 hover:text-red-500 rounded transition opacity-80 hover:opacity-100"
-                          title={`Delete "${bp.name}"`}
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                        <Plus className="w-3 h-3" style={{ color: 'var(--accent)' }} />
+                      <div className="grid grid-cols-2 gap-1">
+                        {group.items.map((item) => {
+                          const IconComp = resolvePurePrimitiveIcon(item.icon);
+                          return (
+                            <button
+                              key={item.type}
+                              type="button"
+                              draggable
+                              onDragStart={(e) =>
+                                handleDragStartCatalog(e, { kind: 'element', elementType: item.type })
+                              }
+                              onClick={() => onAddElement(item.type)}
+                              title={item.desc}
+                              style={{
+                                backgroundColor: 'var(--bg-panel-alt)',
+                                color: 'var(--text-main)',
+                                borderColor: 'var(--border-strong)',
+                              }}
+                              className="flex items-center gap-1.5 px-2 py-1.5 rounded-[6px] border text-[11px] font-medium hover:border-[var(--accent)] transition text-left shadow-sm min-w-0 cursor-grab active:cursor-grabbing"
+                            >
+                              <IconComp className="w-3 h-3 shrink-0" style={{ color: 'var(--accent)' }} />
+                              <span className="truncate min-w-0 flex-1">{item.label}</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   ))}
                 </div>
-              </div>
-            </div>
-          )}
+              )}
 
-          {leftSidebarTab === 'pure' && (
-            <div
-              style={{ height: `${leftLibraryPct}%` }}
-              className="p-2.5 overflow-y-auto shrink-0 space-y-3"
-            >
-              <div
-                style={{
-                  backgroundColor: 'var(--bg-panel-alt)',
-                  borderColor: 'var(--border-strong)',
-                }}
-                className="p-2 rounded-[7px] border text-[10px] leading-snug space-y-1"
-              >
-                <div className="flex items-center justify-between font-bold">
-                  <span style={{ color: 'var(--accent)' }}>Clean Shapes &amp; Containers</span>
-                  <span className="font-mono text-[9px] px-1 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                    Click or Drag
-                  </span>
-                </div>
-                <p style={{ color: 'var(--text-muted)' }}>
-                  Click to add or drag any shape directly onto the canvas. Customize colors, frames &amp; borders on the right.
-                </p>
-              </div>
+              {(elementsFilter === 'all' || elementsFilter === 'widgets') && (
+                <div className="space-y-3">
+                  <div>
+                    <div
+                      style={{ color: 'var(--text-muted)' }}
+                      className="text-[10px] font-mono uppercase tracking-wider mb-1.5"
+                    >
+                      Core &amp; Layout (14)
+                    </div>
+                    <div className="grid grid-cols-2 gap-1">
+                      {CORE_BLOCKS.map((item) => {
+                        const Icon = item.icon;
+                        return (
+                          <button
+                            key={item.type}
+                            draggable
+                            onDragStart={(e) =>
+                              handleDragStartCatalog(e, { kind: 'element', elementType: item.type })
+                            }
+                            onClick={() => onAddElement(item.type)}
+                            style={{
+                              backgroundColor: 'var(--bg-panel-alt)',
+                              borderColor: 'var(--border-main)',
+                            }}
+                            className="flex items-center gap-1.5 px-2 py-1 rounded-[6px] border text-[11px] hover:opacity-85 transition text-left cursor-grab active:cursor-grabbing"
+                          >
+                            <Icon className="w-3 h-3 shrink-0" style={{ color: 'var(--accent)' }} />
+                            <span className="truncate">{item.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-              {PURE_PRIMITIVE_GROUPS.map((group) => (
-                <div key={group.id}>
-                  <div
-                    style={{ color: 'var(--text-muted)' }}
-                    className="text-[10px] font-mono uppercase tracking-wider mb-1"
-                    title={group.subtitle}
-                  >
-                    {group.title}
+                  <div>
+                    <div
+                      style={{ color: 'var(--text-muted)' }}
+                      className="text-[10px] font-mono uppercase tracking-wider mb-1.5"
+                    >
+                      Character &amp; Toyhouse Widgets (12)
+                    </div>
+                    <div className="grid grid-cols-2 gap-1">
+                      {TOYHOUSE_WIDGETS.map((item) => {
+                        const Icon = item.icon;
+                        return (
+                          <button
+                            key={item.type}
+                            draggable
+                            onDragStart={(e) =>
+                              handleDragStartCatalog(e, { kind: 'element', elementType: item.type })
+                            }
+                            onClick={() => onAddElement(item.type)}
+                            style={{
+                              backgroundColor: 'var(--bg-panel-alt)',
+                              borderColor: 'var(--border-strong)',
+                            }}
+                            className="flex items-center gap-1.5 px-2 py-1 rounded-[6px] border text-[11px] hover:opacity-90 transition text-left cursor-grab active:cursor-grabbing"
+                          >
+                            <Icon className="w-3 h-3 shrink-0" style={{ color: 'var(--accent)' }} />
+                            <span className="truncate">{item.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-1">
-                    {group.items.map((item) => {
-                      const IconComp = resolvePurePrimitiveIcon(item.icon);
-                      return (
-                        <button
-                          key={item.type}
-                          type="button"
-                          draggable
-                          onDragStart={(e) => handleDragStartCatalog(e, { kind: 'element', elementType: item.type })}
-                          onClick={() => onAddElement(item.type)}
-                          title={item.desc}
-                          style={{
-                            backgroundColor: 'var(--bg-panel-alt)',
-                            color: 'var(--text-main)',
-                            borderColor: 'var(--border-strong)',
-                          }}
-                          className="flex items-center gap-1.5 px-2 py-1.5 rounded-[6px] border text-[11px] font-medium hover:border-[var(--accent)] transition text-left shadow-sm min-w-0 cursor-grab active:cursor-grabbing"
-                        >
-                          <IconComp className="w-3 h-3 shrink-0" style={{ color: 'var(--accent)' }} />
-                          <span className="truncate min-w-0 flex-1">{item.label}</span>
-                        </button>
-                      );
-                    })}
+
+                  <div>
+                    <div
+                      style={{ color: 'var(--text-muted)' }}
+                      className="text-[10px] font-mono uppercase tracking-wider mb-1.5"
+                    >
+                      Scrapbook &amp; Decorative (7)
+                    </div>
+                    <div className="grid grid-cols-2 gap-1">
+                      {DECORATIVE_BLOCKS.map((item) => {
+                        const Icon = item.icon;
+                        return (
+                          <button
+                            key={item.type}
+                            draggable
+                            onDragStart={(e) =>
+                              handleDragStartCatalog(e, { kind: 'element', elementType: item.type })
+                            }
+                            onClick={() => onAddElement(item.type)}
+                            style={{
+                              backgroundColor: 'var(--bg-panel-alt)',
+                              borderColor: 'var(--border-main)',
+                            }}
+                            className="flex items-center gap-1.5 px-2 py-1 rounded-[6px] border text-[11px] hover:opacity-90 transition text-left cursor-grab active:cursor-grabbing"
+                          >
+                            <Icon className="w-3 h-3 shrink-0" style={{ color: 'var(--accent)' }} />
+                            <span className="truncate">{item.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
-              ))}
+              )}
+
+              {(elementsFilter === 'all' || elementsFilter === 'custom') && (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span
+                      style={{ color: 'var(--text-muted)' }}
+                      className="text-[10px] font-mono uppercase tracking-wider"
+                    >
+                      Custom Objects ({customBlueprints.length})
+                    </span>
+                    <button
+                      onClick={onOpenObjectForge}
+                      style={{ color: 'var(--accent)' }}
+                      className="text-[10px] font-mono font-bold hover:underline flex items-center gap-0.5"
+                    >
+                      <Plus className="w-3 h-3" /> Build New
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    {customBlueprints.map((bp) => (
+                      <div
+                        key={bp.id}
+                        draggable
+                        onDragStart={(e) =>
+                          handleDragStartCatalog(e, { kind: 'blueprint', blueprintId: bp.id })
+                        }
+                        onClick={() => onAddCustomBlueprint(bp)}
+                        style={{
+                          backgroundColor: 'var(--accent-soft)',
+                          borderColor: 'var(--border-strong)',
+                        }}
+                        className="flex items-center justify-between px-2 py-1.5 rounded-[6px] border text-[11px] cursor-pointer hover:opacity-90 transition group"
+                        title={bp.description}
+                      >
+                        <div className="flex items-center gap-1.5 truncate">
+                          <Cpu className="w-3 h-3 shrink-0" style={{ color: 'var(--accent)' }} />
+                          <span className="font-medium truncate">{bp.name}</span>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteCustomBlueprint(bp.id);
+                            }}
+                            className="p-1 text-stone-400 hover:text-red-500 rounded transition opacity-80 hover:opacity-100"
+                            title={`Delete "${bp.name}"`}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                          <Plus className="w-3 h-3" style={{ color: 'var(--accent)' }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1149,10 +1194,16 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             </div>
 
             <div className="space-y-0.5 flex-1">
-              {elements.map((el, idx) => {
+              {layerTreeRows.map((row) => {
+                const el = row.element;
+                const flatIdx = indexById.get(el.id) ?? 0;
                 const isSel = selectedIds.includes(el.id) || selectedId === el.id;
                 const isFloat = isFloatingCollageElement(el);
                 const isEditing = editingLayerId === el.id;
+                const parent = row.parentId ? byId.get(row.parentId) : undefined;
+                const showPaneBadge =
+                  Boolean(parent && getSplitPaneGeometry(parent, 0).split && el.parentPaneIndex !== undefined);
+
                 return (
                   <div
                     key={el.id}
@@ -1160,18 +1211,47 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                     style={{
                       backgroundColor: isSel ? 'var(--accent-soft)' : 'transparent',
                       borderColor: isSel ? 'var(--accent)' : 'transparent',
-                      paddingLeft: el.parentId ? '18px' : '8px',
+                      paddingLeft: `${8 + row.depth * 14}px`,
                       opacity: el.hidden ? 0.45 : 1,
                     }}
-                    className="flex items-center justify-between py-1.5 pr-1.5 rounded-[6px] text-[11px] cursor-pointer border transition group"
+                    className="relative flex items-center justify-between py-1.5 pr-1.5 rounded-[6px] text-[11px] cursor-pointer border transition group"
                   >
-                    <div className="truncate pr-1 flex items-center gap-1.5 flex-1 min-w-0">
+                    {row.depth > 0 && (
                       <span
-                        style={{ color: 'var(--text-muted)' }}
-                        className="font-mono text-[9px] w-4 shrink-0"
-                      >
-                        {el.parentId ? '↳' : String(idx + 1).padStart(2, '0')}
-                      </span>
+                        aria-hidden="true"
+                        style={{
+                          left: `${8 + (row.depth - 1) * 14 + 5}px`,
+                          backgroundColor: 'var(--border-strong)',
+                        }}
+                        className="absolute top-1.5 bottom-1.5 w-px opacity-60 pointer-events-none"
+                      />
+                    )}
+                    <div className="truncate pr-1 flex items-center gap-1 flex-1 min-w-0">
+                      {row.hasChildren ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleLayerCollapsed(el.id);
+                          }}
+                          style={{ color: 'var(--text-muted)' }}
+                          className="w-4 h-4 flex items-center justify-center rounded hover:bg-black/10 dark:hover:bg-white/10 shrink-0"
+                          title={row.isCollapsed ? 'Expand child layers' : 'Collapse child layers'}
+                        >
+                          {row.isCollapsed ? (
+                            <ChevronRight className="w-3 h-3" />
+                          ) : (
+                            <ChevronDown className="w-3 h-3" />
+                          )}
+                        </button>
+                      ) : (
+                        <span
+                          style={{ color: 'var(--text-muted)' }}
+                          className="font-mono text-[9px] w-4 shrink-0 text-center"
+                        >
+                          {row.depth > 0 ? '↳' : String(flatIdx + 1).padStart(2, '0')}
+                        </span>
+                      )}
 
                       {isEditing ? (
                         <input
@@ -1198,6 +1278,34 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                           title="Double-click to rename layer"
                         >
                           {el.label}
+                        </span>
+                      )}
+
+                      {row.hasChildren && (
+                        <span
+                          style={{
+                            backgroundColor: 'var(--bg-panel-alt)',
+                            color: 'var(--text-muted)',
+                            borderColor: 'var(--border-main)',
+                          }}
+                          className="text-[8px] font-mono px-1 rounded-[3px] border shrink-0"
+                          title={`${row.childCount} nested child element(s)`}
+                        >
+                          {row.childCount}
+                        </span>
+                      )}
+
+                      {showPaneBadge && (
+                        <span
+                          style={{
+                            backgroundColor: 'var(--bg-input)',
+                            color: 'var(--text-muted)',
+                            borderColor: 'var(--border-main)',
+                          }}
+                          className="text-[8px] font-mono px-1 rounded-[3px] border shrink-0"
+                          title={`Assigned to Split Pane ${(el.parentPaneIndex ?? 0) + 1}`}
+                        >
+                          P{(el.parentPaneIndex ?? 0) + 1}
                         </span>
                       )}
 
@@ -1249,7 +1357,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                           e.stopPropagation();
                           onMoveLayerOrder(el.id, -1);
                         }}
-                        disabled={idx === 0}
+                        disabled={flatIdx === 0}
                         className="p-0.5 hover:opacity-80 disabled:opacity-20"
                         title="Move Layer Up"
                       >
@@ -1261,7 +1369,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                           e.stopPropagation();
                           onMoveLayerOrder(el.id, 1);
                         }}
-                        disabled={idx === elements.length - 1}
+                        disabled={flatIdx === elements.length - 1}
                         className="p-0.5 hover:opacity-80 disabled:opacity-20"
                         title="Move Layer Down"
                       >
@@ -1299,4 +1407,4 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
       </div>
     </>
   );
-};
+});

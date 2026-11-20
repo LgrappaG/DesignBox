@@ -150,7 +150,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
                 type="button"
                 onClick={() => onPlatformChange('toyhouse_premium')}
                 style={
-                  platform === 'toyhouse_premium'
+                  platform === 'toyhouse_premium' || platform === 'carrd_pro'
                     ? { backgroundColor: 'var(--accent)', color: '#fff' }
                     : { backgroundColor: 'var(--bg-panel)', color: 'var(--text-muted)' }
                 }
@@ -268,7 +268,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
               </div>
               {warnings.length === 0 ? (
                 <div className="p-2 rounded-[6px] bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 text-[11px]">
-                  100% compliant with Toyhouse & Carrd HTML/CSS sanitizer.
+                  100% compliant with Toyhouse HTML/CSS sanitizer.
                 </div>
               ) : (
                 warnings.map((w, i) => (
@@ -333,7 +333,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
               className={`border rounded-[8px] shadow-md bg-transparent ${
                 isDraggingGlobal ? 'pointer-events-none' : ''
               }`}
-              sandbox="allow-same-origin allow-scripts"
+              sandbox="allow-scripts allow-popups"
             />
           </div>
         )}

@@ -103,7 +103,10 @@ export function isSafeUrlValue(raw: string): boolean {
     normalized.startsWith('javascript:') ||
     normalized.startsWith('vbscript:') ||
     normalized.startsWith('data:text/html') ||
-    normalized.startsWith('data:image/svg+xml')
+    normalized.startsWith('data:image/svg+xml') ||
+    normalized.startsWith('data:application/xhtml+xml') ||
+    normalized.startsWith('data:text/xml') ||
+    normalized.startsWith('data:application/xml')
   ) {
     return false;
   }
@@ -123,25 +126,120 @@ export function escapeCssUrl(raw?: string): string {
   return escapeHtmlAttr(trimmed);
 }
 
+const F2U_FORBIDDEN_CSS_PROPS = new Set([
+  'backdrop-filter',
+  '-webkit-backdrop-filter',
+  'clip-path',
+  '-webkit-clip-path',
+  'mask',
+  '-webkit-mask',
+  'mask-image',
+  '-webkit-mask-image',
+  'mask-mode',
+  '-webkit-mask-composite',
+  'mask-composite',
+  'filter',
+  'mix-blend-mode',
+  'transform',
+  'transform-origin',
+  'animation',
+  'animation-name',
+  'transition',
+]);
+
+function splitCssDeclarations(cssText: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let quote: string | null = null;
+  let parenDepth = 0;
+
+  for (let i = 0; i < cssText.length; i += 1) {
+    const ch = cssText[i];
+    if (quote) {
+      current += ch;
+      if (ch === quote && cssText[i - 1] !== '\\') quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+    } else if (ch === '(') {
+      parenDepth += 1;
+      current += ch;
+    } else if (ch === ')') {
+      parenDepth = Math.max(0, parenDepth - 1);
+      current += ch;
+    } else if (ch === ';' && parenDepth === 0) {
+      if (current.trim()) parts.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+function hasUnsafeCssValue(decl: string): boolean {
+  const colonIdx = decl.indexOf(':');
+  if (colonIdx <= 0) {
+    return true;
+  }
+  const propName = decl.slice(0, colonIdx).trim();
+  if (!/^(?:--[a-zA-Z0-9_-]+|-?[a-zA-Z][a-zA-Z0-9-]*)$/.test(propName)) {
+    return true;
+  }
+  if (/[<>{}]/.test(decl)) {
+    return true;
+  }
+  if (/["']\s*\/?\s*(?:on[a-z]+|style|href|src|srcdoc)\s*=/i.test(decl)) {
+    return true;
+  }
+  if (
+    ((decl.match(/"/g)?.length ?? 0) % 2 !== 0) ||
+    ((decl.match(/'/g)?.length ?? 0) % 2 !== 0)
+  ) {
+    return true;
+  }
+  if (/expression\s*\(|javascript:|vbscript:|behavior\s*:/i.test(decl)) {
+    return true;
+  }
+  const urlCallRegex = /url\s*\(([^)]*)\)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = urlCallRegex.exec(decl)) !== null) {
+    const inner = match[1].trim().replace(/^['"]|['"]$/g, '');
+    if (!isSafeUrlValue(inner)) return true;
+  }
+  // Reject malformed unclosed url( if present alongside suspicious schemes
+  if (/url\s*\(/i.test(decl) && !/url\s*\([^)]*\)/i.test(decl)) {
+    return true;
+  }
+  return false;
+}
+
+function sanitizeSurvivingCssDecl(decl: string): string {
+  return decl.replace(/"/g, "'").replace(/[<>]/g, '');
+}
+
 /**
  * Sanitizes rich body HTML (`content`, `subContent`, tab/gallery captions) using a strict inline tag
  * whitelist so safe formatting (`<b>`, `<i>`, `<a href>`, `<br>`, `<span style>`, etc.) is preserved
- * while stripping `<script>`, `<style>`, `<iframe>`, `on*` handlers, and `javascript:`/`data:text/html` URLs.
+ * while stripping `<script>`, `<style>`, `<iframe>`, `on*` handlers, slash-separated bypasses, and unsafe URLs.
  */
 export function sanitizeF2UBodyHtml(raw: string): string {
   if (!raw) return '';
-  // Remove dangerous blocks along with their contents
+  // Remove dangerous blocks along with their contents (including slash-separated attributes like <script/src=x>)
   let stripped = raw.replace(
-    /<(script|style|iframe|object|embed|svg|math|form|textarea|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi,
+    /<(script|style|iframe|object|embed|svg|math|form|textarea|noscript)(?=[\s/>]|$)[^>]*>[\s\S]*?<\/\1>/gi,
     ''
   );
   stripped = stripped.replace(
-    /<\/?(script|style|iframe|object|embed|svg|math|form|textarea|noscript)\b[^>]*\/?>/gi,
+    /<\/?(script|style|iframe|object|embed|svg|math|form|textarea|noscript)(?=[\s/>]|$)[^>]*\/?>/gi,
     ''
   );
 
-  // Filter individual HTML tags using a safe attribute whitelist
-  return stripped.replace(/<\/?([a-zA-Z][a-zA-Z0-9:-]*)(\s+[^<>]*)?\/?>/g, (full, rawTag: string, rawAttrs = '') => {
+  // Filter individual HTML tags using a safe attribute whitelist (supports space and HTML5 slash attribute separators)
+  return stripped.replace(/<\/?([a-zA-Z][a-zA-Z0-9:-]*)((?:[\s/][^<>]*)?)>/g, (full, rawTag: string, rawAttrs = '') => {
     const tag = rawTag.toLowerCase();
     if (!SAFE_BODY_TAGS.has(tag)) return '';
     if (full.startsWith('</')) {
@@ -167,7 +265,7 @@ export function sanitizeF2UBodyHtml(raw: string): string {
       } else if (name === 'class' || name === 'title') {
         cleanAttrs.push(`${name}="${escapeHtmlAttr(val)}"`);
       } else if (name === 'style') {
-        if (/expression\s*\(|javascript:|vbscript:|behavior\s*:/i.test(val)) continue;
+        if (hasUnsafeCssValue(val)) continue;
         const { cleanCss } = sanitizeInlineCssForF2U(val);
         if (cleanCss) cleanAttrs.push(`style="${escapeHtmlAttr(cleanCss)}"`);
       }
@@ -179,6 +277,86 @@ export function sanitizeF2UBodyHtml(raw: string): string {
   });
 }
 
+function sanitizeHtmlTagAttributesForPro(tagChunk: string): string {
+  const URL_ATTRS = new Set(['href', 'src', 'action', 'formaction', 'xlink:href', 'poster', 'data']);
+  return tagChunk.replace(/<\/?([a-zA-Z][a-zA-Z0-9:-]*)((?:[\s/][^<>]*)?)>/g, (full, rawTag: string, rawAttrs = '') => {
+    if (full.startsWith('</')) return `</${rawTag}>`;
+    const isSelfClosing = full.trimEnd().endsWith('/>');
+    const cleanAttrs: string[] = [];
+    const attrRegex = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+    let m: RegExpExecArray | null;
+    while ((m = attrRegex.exec(rawAttrs)) !== null) {
+      const attrName = m[1];
+      const lowerName = attrName.toLowerCase();
+      const rawVal = m[2] ?? m[3] ?? m[4];
+      if (lowerName.startsWith('on')) continue;
+
+      if (rawVal === undefined) {
+        cleanAttrs.push(attrName);
+        continue;
+      }
+
+      if (URL_ATTRS.has(lowerName)) {
+        if (!isSafeUrlValue(rawVal)) continue;
+        cleanAttrs.push(`${attrName}="${escapeHtmlAttr(rawVal.trim())}"`);
+      } else if (lowerName === 'style') {
+        const cleanStyle = sanitizeInlineCssForPro(rawVal);
+        if (cleanStyle) cleanAttrs.push(`style="${escapeHtmlAttr(cleanStyle)}"`);
+      } else {
+        cleanAttrs.push(`${attrName}="${escapeHtmlAttr(rawVal)}"`);
+      }
+    }
+    const attrStr = cleanAttrs.length > 0 ? ` ${cleanAttrs.join(' ')}` : '';
+    return isSelfClosing ? `<${rawTag}${attrStr} />` : `<${rawTag}${attrStr}>`;
+  });
+}
+
+/**
+ * Sanitizes Pro custom/raw HTML while preserving `<style>` blocks and rich layout tags:
+ * strips `<script>`, `<iframe>`, `<object>`, `<embed>`, `<form>`, `<meta>`, `<base>`, `<noscript>`,
+ * all inline `on*` event attributes (including slash-separated), and unsafe `javascript:`/`data:` URLs.
+ */
+export function sanitizeRichHtmlForPro(raw: string): string {
+  if (!raw) return '';
+  let stripped = raw;
+  // Loop briefly so nested obfuscations like <scr<script>ipt> cannot reassemble dangerous tags
+  for (let pass = 0; pass < 2; pass += 1) {
+    const next = stripped
+      .replace(
+        /<(script|iframe|object|embed|form|meta|base|noscript)(?=[\s/>]|$)[^>]*>[\s\S]*?<\/\1>/gi,
+        ''
+      )
+      .replace(
+        /<\/?(script|iframe|object|embed|form|meta|base|noscript)(?=[\s/>]|$)[^>]*\/?>/gi,
+        ''
+      );
+    stripped = next;
+    if (!/<\/?(script|iframe|object|embed|form|meta|base|noscript)(?=[\s/>]|$)/i.test(stripped)) {
+      break;
+    }
+  }
+
+  // Preserve <style> bodies cleanly while sanitizing <style> opening tag attributes and dangerous CSS expressions
+  const styleTokenRegex = /<style((?:[\s/][^<>]*)?)>([\s\S]*?)<\/style>/gi;
+  let result = '';
+  let lastIndex = 0;
+  let styleMatch: RegExpExecArray | null;
+  while ((styleMatch = styleTokenRegex.exec(stripped)) !== null) {
+    const before = stripped.slice(lastIndex, styleMatch.index);
+    result += sanitizeHtmlTagAttributesForPro(before);
+    const cleanStyleOpen = sanitizeHtmlTagAttributesForPro(`<style${styleMatch[1] || ''}>`);
+    const cleanCssBody = styleMatch[2]
+      .replace(/expression\s*\(/gi, 'invalid(')
+      .replace(/javascript\s*:/gi, 'invalid:')
+      .replace(/vbscript\s*:/gi, 'invalid:')
+      .replace(/behavior\s*:/gi, 'invalid:');
+    result += `${cleanStyleOpen}${cleanCssBody}</style>`;
+    lastIndex = styleMatch.index + styleMatch[0].length;
+  }
+  result += sanitizeHtmlTagAttributesForPro(stripped.slice(lastIndex));
+  return result;
+}
+
 export function sanitizeInlineCssForF2U(rawCss?: string): {
   cleanCss: string;
   strippedProps: string[];
@@ -186,33 +364,47 @@ export function sanitizeInlineCssForF2U(rawCss?: string): {
   if (!rawCss || !rawCss.trim()) {
     return { cleanCss: '', strippedProps: [] };
   }
-  const strippedProps: string[] = [];
-  const declarations = rawCss
-    .split(';')
-    .map((part) => part.trim())
-    .filter(Boolean);
+  const uncommented = rawCss.replace(/\/\*[\s\S]*?\*\//g, '').trim();
+  if (!uncommented) {
+    return { cleanCss: '', strippedProps: [] };
+  }
 
-  const safeDeclarations = declarations.filter((decl) => {
+  const strippedProps: string[] = [];
+  const declarations = splitCssDeclarations(uncommented);
+
+  const safeDeclarations: string[] = [];
+  for (const decl of declarations) {
+    if (hasUnsafeCssValue(decl)) {
+      const colonIdx = decl.indexOf(':');
+      strippedProps.push((colonIdx >= 0 ? decl.slice(0, colonIdx) : decl).trim().toLowerCase() || 'unsafe-css');
+      continue;
+    }
     const colonIdx = decl.indexOf(':');
     const propName = (colonIdx >= 0 ? decl.slice(0, colonIdx) : decl).trim().toLowerCase();
-    if (
-      propName === 'backdrop-filter' ||
-      propName === '-webkit-backdrop-filter' ||
-      propName === 'clip-path' ||
-      propName === '-webkit-clip-path' ||
-      propName === 'mask-image' ||
-      propName === '-webkit-mask-image'
-    ) {
+    const propVal = colonIdx >= 0 ? decl.slice(colonIdx + 1) : '';
+    if (F2U_FORBIDDEN_CSS_PROPS.has(propName) || /\bcalc\s*\(/i.test(propVal)) {
       strippedProps.push(propName);
-      return false;
+      continue;
     }
-    return true;
-  });
+    safeDeclarations.push(sanitizeSurvivingCssDecl(decl));
+  }
 
   return {
     cleanCss: safeDeclarations.join('; '),
     strippedProps,
   };
+}
+
+export function sanitizeInlineCssForPro(rawCss?: string): string {
+  if (!rawCss || !rawCss.trim()) return '';
+  const uncommented = rawCss.replace(/\/\*[\s\S]*?\*\//g, '').trim();
+  if (!uncommented) return '';
+  const declarations = splitCssDeclarations(uncommented);
+  return declarations
+    .filter((decl) => !hasUnsafeCssValue(decl))
+    .map(sanitizeSurvivingCssDecl)
+    .filter(Boolean)
+    .join('; ');
 }
 
 function normalizeF2URotation(deg?: number): number | undefined {
@@ -273,7 +465,28 @@ export function getElementF2UShieldReport(el: DesignElement): F2UShieldReport {
     });
   }
 
-  const proModifiers = (el.modifiers || []).filter((m) => isModifierProOnly(m, el));
+  const preFilteredMods = el.modifiers
+    ? el.modifiers.filter((m) => {
+        if (!m.enabled) return true;
+        if (m.kind === 'boolean_mask') return false;
+        if (
+          m.kind === 'divider_line' &&
+          (m.orientation === 'diag_fwd' || m.orientation === 'diag_back')
+        ) {
+          return false;
+        }
+        if (
+          m.kind === 'cutout_hole' &&
+          m.mode === 'transparent_hole' &&
+          (m.shape === 'ticket_corners' || m.shape === 'diamond' || m.shape === 'star')
+        ) {
+          return false;
+        }
+        return true;
+      })
+    : undefined;
+  const preFilteredEl: DesignElement = preFilteredMods ? { ...el, modifiers: preFilteredMods } : el;
+  const proModifiers = (el.modifiers || []).filter((m) => isModifierProOnly(m, preFilteredEl));
   if (proModifiers.length > 0) {
     items.push({
       key: 'modifiers',
@@ -284,14 +497,14 @@ export function getElementF2UShieldReport(el: DesignElement): F2UShieldReport {
   }
 
   if (
-    el.hoverEffect !== 'none' ||
+    (el.hoverEffect && el.hoverEffect !== 'none') ||
     (el.hoverAction && el.hoverAction !== 'none') ||
     (el.imageHoverEffect && el.imageHoverEffect !== 'none')
   ) {
     const hoverName =
-      el.hoverEffect !== 'none'
+      el.hoverEffect && el.hoverEffect !== 'none'
         ? el.hoverEffect
-        : el.hoverAction !== 'none'
+        : el.hoverAction && el.hoverAction !== 'none'
         ? el.hoverAction
         : el.imageHoverEffect;
     items.push({
@@ -363,14 +576,35 @@ export function getElementF2UShieldReport(el: DesignElement): F2UShieldReport {
  */
 export function maskElementForF2USimulation(el: DesignElement): DesignElement {
   const { cleanCss } = sanitizeInlineCssForF2U(el.customInlineStyle);
-  const safeMods = el.modifiers
-    ? el.modifiers.filter((m) => !isModifierProOnly(m, el))
+  const preFilteredMods = el.modifiers
+    ? el.modifiers.filter((m) => {
+        if (!m.enabled) return true;
+        if (m.kind === 'boolean_mask') return false;
+        if (
+          m.kind === 'divider_line' &&
+          (m.orientation === 'diag_fwd' || m.orientation === 'diag_back')
+        ) {
+          return false;
+        }
+        if (
+          m.kind === 'cutout_hole' &&
+          m.mode === 'transparent_hole' &&
+          (m.shape === 'ticket_corners' || m.shape === 'diamond' || m.shape === 'star')
+        ) {
+          return false;
+        }
+        return true;
+      })
+    : undefined;
+  const preFilteredEl: DesignElement = preFilteredMods ? { ...el, modifiers: preFilteredMods } : el;
+  const safeMods = preFilteredMods
+    ? preFilteredMods.filter((m) => !isModifierProOnly(m, preFilteredEl))
     : undefined;
 
   return {
     ...el,
     glassBlur: 0,
-    rotation: normalizeF2URotation(el.rotation),
+    rotation: el.type === 'pure_line' ? el.rotation : normalizeF2URotation(el.rotation),
     imgRotation: normalizeF2URotation(el.imgRotation),
     hoverEffect: 'none',
     hoverAction: 'none',
@@ -378,11 +612,21 @@ export function maskElementForF2USimulation(el: DesignElement): DesignElement {
     idleAnimation: el.idleAnimation === 'float' ? 'none' : el.idleAnimation,
     imageShape: isF2USafeShape(el.imageShape) ? el.imageShape : 'rect',
     boxClipShape: isF2USafeShape(el.boxClipShape) ? el.boxClipShape : 'rect',
+    blendMode: 'normal',
+    imgBrightness: undefined,
+    imgContrast: undefined,
+    imgGrayscale: undefined,
+    imgSepia: undefined,
+    imgBlur: undefined,
     googleFont: undefined,
     modifiers: safeMods,
     customInlineStyle: cleanCss || undefined,
-    customHtml: el.customHtml ? stripStyleTagsFromHtml(el.customHtml) : el.customHtml,
-    rawInnerHtml: el.rawInnerHtml ? stripStyleTagsFromHtml(el.rawInnerHtml) : el.rawInnerHtml,
+    customHtml: el.customHtml
+      ? stripStyleTagsFromHtml(sanitizeRichHtmlForPro(el.customHtml))
+      : el.customHtml,
+    rawInnerHtml: el.rawInnerHtml
+      ? stripStyleTagsFromHtml(sanitizeRichHtmlForPro(el.rawInnerHtml))
+      : el.rawInnerHtml,
   };
 }
 

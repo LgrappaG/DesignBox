@@ -47,13 +47,13 @@ const BOX_SHAPE_OPTIONS: ReadonlyArray<{ id: ImageShape; label: string; f2u: boo
 ];
 
 const F2UBadge = () => (
-  <span className="text-[8.5px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-semibold">
+  <span className="text-[8.5px] font-mono px-1.5 py-[1px] rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-semibold">
     F2U
   </span>
 );
 
 const ProBadge = () => (
-  <span className="text-[8.5px] font-mono px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-semibold">
+  <span className="text-[8.5px] font-mono px-1.5 py-[1px] rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-semibold">
     PRO
   </span>
 );
@@ -104,7 +104,7 @@ export const PureSurfaceSculptorSection: React.FC<PureInspectorProps> = ({
               borderColor: 'var(--border-strong)',
             }}
             className="border rounded-[5px] px-1.5 py-1 text-[10px] font-medium hover:opacity-85 transition flex items-center justify-center gap-1"
-            title={rec.f2uSafe ? '100% Toyhouse F2U Safe' : 'Requires Toyhouse Premium / Carrd Pro'}
+            title={rec.f2uSafe ? '100% Toyhouse F2U Safe' : 'Requires Toyhouse Premium'}
           >
             <span className="truncate">{rec.name}</span>
             {!rec.f2uSafe && <span className="text-[8px] text-amber-500 font-mono">PRO</span>}
@@ -142,7 +142,7 @@ export const PureSurfaceSculptorSection: React.FC<PureInspectorProps> = ({
                     ? isF2UGeometricShape(shp.id)
                       ? '100% Toyhouse F2U Safe (4-quadrant inline CSS gradient geometry)'
                       : '100% Toyhouse F2U Safe (pure border-radius)'
-                    : 'Pro clip-path shape (masked on F2U, preserved for Premium/Carrd)'
+                    : 'Pro clip-path shape (masked on F2U, preserved for Toyhouse Premium)'
                 }
               >
                 <span className="truncate">{shp.label}</span>

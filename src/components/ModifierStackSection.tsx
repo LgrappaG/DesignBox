@@ -323,7 +323,7 @@ export const ModifierStackSection: React.FC<ModifierStackProps> = ({
                     #{idx + 1} {getModLabel(mod.kind)}
                   </span>
                   <span
-                    className={`text-[8px] font-mono px-1 py-0.2 rounded font-bold ${
+                    className={`text-[8px] font-mono px-1 py-[1px] rounded font-bold ${
                       isPro
                         ? 'bg-amber-500/15 text-amber-500'
                         : 'bg-emerald-500/15 text-emerald-500'

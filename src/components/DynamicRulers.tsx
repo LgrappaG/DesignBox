@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef } from 'react';
+import { CursorTracker } from '../hooks/useViewportNavigation';
 import { CanvasGuide, UiTheme } from '../types/schema';
 import {
   CuteThemeColors,
@@ -12,7 +13,8 @@ interface DynamicRulerProps {
   originOffsetPx: number;
   canvasExtentPx: number;
   zoom: number;
-  cursorCanvasPos: number | null;
+  cursorTracker?: CursorTracker;
+  cursorCanvasPos?: number | null;
   uiTheme: UiTheme;
   cuteThemeColors?: CuteThemeColors;
   guides?: CanvasGuide[];
@@ -22,12 +24,13 @@ interface DynamicRulerProps {
 
 const MAJOR_STEP_CANDIDATES = [10, 20, 25, 50, 100, 200, 250, 500, 1000];
 
-export const DynamicRulerCanvas: React.FC<DynamicRulerProps> = ({
+const DynamicRulerCanvasInner: React.FC<DynamicRulerProps> = ({
   orientation,
   lengthPx,
   originOffsetPx,
   canvasExtentPx,
   zoom,
+  cursorTracker,
   cursorCanvasPos,
   uiTheme,
   cuteThemeColors = DEFAULT_CUTE_THEME_COLORS,
@@ -36,17 +39,28 @@ export const DynamicRulerCanvas: React.FC<DynamicRulerProps> = ({
   onStartCreateGuide,
 }) => {
   const canvasElRef = useRef<HTMLCanvasElement | null>(null);
+  const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const initialCursorPos = cursorTracker
+    ? cursorTracker.get().inside
+      ? orientation === 'horizontal'
+        ? cursorTracker.get().x
+        : cursorTracker.get().y
+      : null
+    : cursorCanvasPos ?? null;
+  const latestCursorPosRef = useRef<number | null>(initialCursorPos);
+  const themeOverrideRef = useRef<{ uiTheme?: UiTheme; cuteColors?: CuteThemeColors }>({});
   const thickness = 20;
 
-  const drawRuler = useCallback(
+  const paintNeedleOverlay = useCallback(
     (themeOverride?: UiTheme, cuteOverride?: CuteThemeColors) => {
       const canvas = canvasElRef.current;
-      if (!canvas || lengthPx <= 0) return;
+      const staticCanvas = staticCanvasRef.current;
+      if (!canvas || !staticCanvas || lengthPx <= 0) return;
 
       const dpr = Math.max(1, window.devicePixelRatio || 1);
       const w = orientation === 'horizontal' ? lengthPx : thickness;
       const h = orientation === 'horizontal' ? thickness : lengthPx;
-
       const targetW = Math.round(w * dpr);
       const targetH = Math.round(h * dpr);
       if (canvas.width !== targetW) canvas.width = targetW;
@@ -58,7 +72,77 @@ export const DynamicRulerCanvas: React.FC<DynamicRulerProps> = ({
       if (!ctx) return;
 
       ctx.save();
-      ctx.scale(dpr, dpr);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, targetW, targetH);
+      ctx.drawImage(staticCanvas, 0, 0);
+
+      const posVal = latestCursorPosRef.current;
+      if (posVal !== null) {
+        const cPos = Math.round(originOffsetPx + posVal * zoom) + 0.5;
+        if (cPos >= 0 && cPos <= lengthPx) {
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          const palette = resolveRulerPalette(
+            themeOverride ?? themeOverrideRef.current.uiTheme ?? uiTheme,
+            cuteOverride ?? themeOverrideRef.current.cuteColors ?? cuteThemeColors
+          );
+          const { accentColor } = palette;
+
+          ctx.strokeStyle = accentColor;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          if (orientation === 'horizontal') {
+            ctx.moveTo(cPos, 0);
+            ctx.lineTo(cPos, h);
+          } else {
+            ctx.moveTo(0, cPos);
+            ctx.lineTo(w, cPos);
+          }
+          ctx.stroke();
+
+          ctx.fillStyle = accentColor;
+          ctx.beginPath();
+          if (orientation === 'horizontal') {
+            ctx.moveTo(cPos - 3.5, h);
+            ctx.lineTo(cPos + 3.5, h);
+            ctx.lineTo(cPos, h - 5);
+          } else {
+            ctx.moveTo(w, cPos - 3.5);
+            ctx.lineTo(w, cPos + 3.5);
+            ctx.lineTo(w - 5, cPos);
+          }
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+
+      ctx.restore();
+    },
+    [orientation, lengthPx, originOffsetPx, zoom, uiTheme, cuteThemeColors]
+  );
+
+  const drawStaticAndComposite = useCallback(
+    (themeOverride?: UiTheme, cuteOverride?: CuteThemeColors) => {
+      if (lengthPx <= 0) return;
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      const w = orientation === 'horizontal' ? lengthPx : thickness;
+      const h = orientation === 'horizontal' ? thickness : lengthPx;
+      const targetW = Math.round(w * dpr);
+      const targetH = Math.round(h * dpr);
+
+      if (!staticCanvasRef.current && typeof document !== 'undefined') {
+        staticCanvasRef.current = document.createElement('canvas');
+      }
+      const staticCanvas = staticCanvasRef.current;
+      if (!staticCanvas) return;
+
+      if (staticCanvas.width !== targetW) staticCanvas.width = targetW;
+      if (staticCanvas.height !== targetH) staticCanvas.height = targetH;
+
+      const ctx = staticCanvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       const palette = resolveRulerPalette(
         themeOverride ?? uiTheme,
@@ -66,11 +150,9 @@ export const DynamicRulerCanvas: React.FC<DynamicRulerProps> = ({
       );
       const { rulerBg, tickColor, textColor, accentColor, spanHighlight } = palette;
 
-      // Fill background
       ctx.fillStyle = rulerBg;
       ctx.fillRect(0, 0, w, h);
 
-      // Subtle highlight for active canvas span [0 .. canvasExtentPx]
       const spanStart = originOffsetPx;
       const spanEnd = originOffsetPx + canvasExtentPx * zoom;
       const clippedStart = Math.max(0, spanStart);
@@ -84,7 +166,6 @@ export const DynamicRulerCanvas: React.FC<DynamicRulerProps> = ({
         }
       }
 
-      // Choose adaptive tick step based on current zoom
       const majorStep = MAJOR_STEP_CANDIDATES.find((s) => s * zoom >= 56) || 1000;
       const subCount =
         majorStep === 20 ? 4 : majorStep === 100 && zoom >= 1.2 ? 10 : majorStep === 200 ? 4 : 5;
@@ -140,7 +221,6 @@ export const DynamicRulerCanvas: React.FC<DynamicRulerProps> = ({
         }
       }
 
-      // Crisp 0 and canvasExtent end markers
       [0, canvasExtentPx].forEach((bound) => {
         const boundPos = Math.round(originOffsetPx + bound * zoom) + 0.5;
         if (boundPos >= 0 && boundPos <= lengthPx) {
@@ -160,7 +240,6 @@ export const DynamicRulerCanvas: React.FC<DynamicRulerProps> = ({
         }
       });
 
-      // Persistent ruler guide markers along matching axis
       const axisToRender = orientation === 'horizontal' ? 'x' : 'y';
       guides
         .filter((g) => g.axis === axisToRender)
@@ -183,39 +262,8 @@ export const DynamicRulerCanvas: React.FC<DynamicRulerProps> = ({
           }
         });
 
-      // Live cursor tracking needle
-      if (cursorCanvasPos !== null) {
-        const cPos = Math.round(originOffsetPx + cursorCanvasPos * zoom) + 0.5;
-        if (cPos >= 0 && cPos <= lengthPx) {
-          ctx.strokeStyle = accentColor;
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          if (orientation === 'horizontal') {
-            ctx.moveTo(cPos, 0);
-            ctx.lineTo(cPos, h);
-          } else {
-            ctx.moveTo(0, cPos);
-            ctx.lineTo(w, cPos);
-          }
-          ctx.stroke();
-
-          ctx.fillStyle = accentColor;
-          ctx.beginPath();
-          if (orientation === 'horizontal') {
-            ctx.moveTo(cPos - 3.5, h);
-            ctx.lineTo(cPos + 3.5, h);
-            ctx.lineTo(cPos, h - 5);
-          } else {
-            ctx.moveTo(w, cPos - 3.5);
-            ctx.lineTo(w, cPos + 3.5);
-            ctx.lineTo(w - 5, cPos);
-          }
-          ctx.closePath();
-          ctx.fill();
-        }
-      }
-
       ctx.restore();
+      paintNeedleOverlay(themeOverride, cuteOverride);
     },
     [
       orientation,
@@ -223,26 +271,71 @@ export const DynamicRulerCanvas: React.FC<DynamicRulerProps> = ({
       originOffsetPx,
       canvasExtentPx,
       zoom,
-      cursorCanvasPos,
       uiTheme,
       cuteThemeColors,
       guides,
+      paintNeedleOverlay,
     ]
   );
 
   useEffect(() => {
-    drawRuler();
-  }, [drawRuler]);
+    drawStaticAndComposite();
+  }, [drawStaticAndComposite]);
+
+  useEffect(() => {
+    if (cursorTracker) return;
+    const nextPos = cursorCanvasPos ?? null;
+    if (latestCursorPosRef.current === nextPos) return;
+    latestCursorPosRef.current = nextPos;
+    paintNeedleOverlay();
+  }, [cursorCanvasPos, cursorTracker, paintNeedleOverlay]);
+
+  useEffect(() => {
+    if (!cursorTracker) return;
+    const syncInitial = () => {
+      const s = cursorTracker.get();
+      latestCursorPosRef.current = s.inside
+        ? orientation === 'horizontal'
+          ? s.x
+          : s.y
+        : null;
+    };
+    syncInitial();
+
+    const unsub = cursorTracker.subscribe((state) => {
+      const nextPos = state.inside
+        ? orientation === 'horizontal'
+          ? state.x
+          : state.y
+        : null;
+      if (latestCursorPosRef.current === nextPos) return;
+      latestCursorPosRef.current = nextPos;
+      if (rafRef.current !== null) return;
+      rafRef.current = window.requestAnimationFrame(() => {
+        rafRef.current = null;
+        paintNeedleOverlay();
+      });
+    });
+
+    return () => {
+      unsub();
+      if (rafRef.current !== null) {
+        window.cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [cursorTracker, orientation, paintNeedleOverlay]);
 
   useEffect(() => {
     const handleLiveThemeUpdate = (ev: Event) => {
       const detail = (ev as CustomEvent<{ uiTheme?: UiTheme; cuteColors?: CuteThemeColors }>).detail;
       if (!detail) return;
-      drawRuler(detail.uiTheme, detail.cuteColors);
+      themeOverrideRef.current = { uiTheme: detail.uiTheme, cuteColors: detail.cuteColors };
+      drawStaticAndComposite(detail.uiTheme, detail.cuteColors);
     };
     window.addEventListener('dbx-theme-vars-updated', handleLiveThemeUpdate);
     return () => window.removeEventListener('dbx-theme-vars-updated', handleLiveThemeUpdate);
-  }, [drawRuler]);
+  }, [drawStaticAndComposite]);
 
   return (
     <canvas
@@ -260,3 +353,4 @@ export const DynamicRulerCanvas: React.FC<DynamicRulerProps> = ({
   );
 };
 
+export const DynamicRulerCanvas = React.memo(DynamicRulerCanvasInner);

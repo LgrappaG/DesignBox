@@ -17,6 +17,7 @@ export type CanvasAlignAction =
 
 export interface QuickAlignToolbarProps {
   pinnedOverlay: boolean;
+  disabled?: boolean;
   onTogglePinnedOverlay: (next: boolean) => void;
   onAlignSelectedOnCanvas: (align: CanvasAlignAction) => void;
 }
@@ -34,22 +35,24 @@ const ALIGN_BUTTONS: ReadonlyArray<{ id: CanvasAlignAction; label: string; title
 /** Pinned Figma-style alignment toolbar rendered in the sticky element header. */
 export const QuickAlignToolbar: React.FC<QuickAlignToolbarProps> = ({
   pinnedOverlay,
+  disabled = false,
   onTogglePinnedOverlay,
   onAlignSelectedOnCanvas,
 }) => {
   return (
-    <div className="flex items-center gap-1 pt-0.5">
+    <div className={`flex items-center gap-1 pt-0.5 ${disabled ? 'opacity-45 pointer-events-none' : ''}`}>
       <div className="flex-1 grid grid-cols-7 gap-1 text-[9.5px] font-mono min-w-0">
         {ALIGN_BUTTONS.map((btn) => (
           <button
             key={btn.id}
             type="button"
+            disabled={disabled}
             onClick={() => onAlignSelectedOnCanvas(btn.id)}
             style={{
               backgroundColor: 'var(--bg-input)',
               borderColor: 'var(--border-strong)',
             }}
-            className="py-1 px-0.5 rounded-[4px] border hover:border-[var(--accent)] text-center whitespace-nowrap transition"
+            className="py-1 px-0.5 rounded-[4px] border hover:border-[var(--accent)] text-center whitespace-nowrap transition disabled:cursor-not-allowed"
             title={btn.title}
           >
             {btn.label}
@@ -58,6 +61,7 @@ export const QuickAlignToolbar: React.FC<QuickAlignToolbarProps> = ({
       </div>
       <button
         type="button"
+        disabled={disabled}
         onClick={() => onTogglePinnedOverlay(!pinnedOverlay)}
         style={
           pinnedOverlay
